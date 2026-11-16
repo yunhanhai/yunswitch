@@ -2,90 +2,94 @@
 
 # YunSwitch
 
-Configuration and routing manager for AI coding tools.
+Configuration and local routing for AI coding tools, across providers and models.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2-orange.svg)](https://tauri.app/)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#development)
+[![Windows x64 prerelease](https://img.shields.io/badge/Windows_x64-Prerelease-blue.svg)](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.8)
 
 English | [中文](README_ZH.md) | [日本語](README_JA.md) | [Deutsch](README_DE.md)
+
+[Download and quick start](#download-and-quick-start) · [Features](#features) · [Documentation](#documentation) · [Roadmap](docs/DEVELOPMENT-ROADMAP.md)
 
 [Gitee](https://gitee.com/yunhanhai/yunswitch) · [GitHub](https://github.com/yunhanhai/yunswitch) · [Project notes](docs/PROJECT.md) · [Changelog](CHANGELOG.md)
 
 </div>
 
-## About this project
+> **Project support · [艺の公益站](https://ultrarouter.org/sign-up?aff=KnwD)**
+>
+> Thank you to 艺の公益站 for supporting YunSwitch. The link above is a referral signup link.
 
-This is an open-source distribution **independently maintained by yunhanhai**, based on **v3.20.1** of [farion1231/cc-switch](https://github.com/farion1231/cc-switch). It adds routing groups, model aliases across providers, model catalog assistance, Claude → Codex provider configuration conversion, and request resilience improvements to the inherited configuration manager and local proxy.
+## About
 
-The project currently has one maintainer. Future work will draw on useful ideas from other open-source projects as practical needs emerge. [Project notes](docs/PROJECT.md) document provenance, versioning and planned work. The upstream copyright and MIT terms remain in [LICENSE](LICENSE), with an additional notice for changes by yunhanhai.
+YunSwitch manages provider configurations for Claude Code, Codex, Gemini CLI and other coding tools. Its local proxy organizes routes, maps model names and handles recoverable request failures.
 
-Use the Gitee and GitHub repositories linked here for this distribution. The upstream website, packages, package-manager sources and sponsorship arrangements belong to the original project; releases and support for this distribution are maintained separately.
+**Independently maintained by yunhanhai**, this project continues development from [CC Switch v3.20.1](https://github.com/farion1231/cc-switch). Routing groups, model aliases across providers, configuration conversion and request recovery are its main additions. See the [project notes](docs/PROJECT.md) and [source ledger](docs/PROVENANCE.md) for provenance and licensing.
 
-## Inherited capabilities and added work
+## Download and quick start
 
-The inherited application manages configurations for Claude Code, Claude Desktop, Codex, Gemini CLI, Grok Build, OpenCode, OpenClaw and Hermes Agent. It also provides provider switching, MCP, Prompts, Skills, session management, usage tracking, a local proxy and basic failover. See the [user manual](docs/user-manual/en/README.md) for client-specific capabilities and requirements.
+Current release: **`3.20.1-yunswitch.8` Windows x64 prerelease**, available as an MSI installer and portable ZIP.
 
-The main additions relative to the v3.20.1 baseline are:
+| Platform      | Downloads and verification                                                                                                                                                                                                                   |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Windows x64   | [GitHub download](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.8) · [Gitee download](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.8); installation, upgrade from `.7` and uninstall checked |
+| macOS / Linux | [Source CI](https://github.com/yunhanhai/yunswitch/actions/runs/43592579771) passed; independent packages and installation acceptance are pending                                                                                            |
+| ARM64         | No independent packages or installation acceptance yet                                                                                                                                                                                       |
 
-| Area                | Work in this distribution                                                                                                                                  | Details                                                |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| Routing groups      | Per-app provider groups, enable/disable controls, ordering, effective route previews and health indicators                                                 | [Routing groups](docs/routing-groups.en.md)            |
-| Model aliases       | Map one logical model to provider-specific names and remap on failover; suggest aliases from existing mappings                                             | [Alias design](docs/model-alias-routing-design.md)     |
-| Gemini routing      | Handle aliases in model URL paths, provider selection and the model actually sent upstream                                                                 | [Development record](docs/RELEASE-NOTES-P1-P6.md)      |
-| Model catalogs      | Dynamic catalogs, caching and mapping assistance                                                                                                           | [User manual](docs/user-manual/en/README.md)           |
-| Provider conversion | Convert third-party Claude providers into Codex configurations, preserve source models, prevent duplicates and probe direct-mode candidates                | [Conversion notes](docs/claude-to-codex-conversion.md) |
-| Request resilience  | Observe 429 waits, cooldowns and circuit states; optionally retry the same provider before failover                                                        | [Development record](docs/RELEASE-NOTES-P1-P6.md)      |
-| Maintenance         | Preserve unrelated configuration fields/comments, isolate development and test directories, check four locales and exercise routing through loopback tests | [Contributing](CONTRIBUTING.md)                        |
+Version `.8` coordinates rate-limit recovery attempts, respects extended shared cooldowns and bounds queueing and waiting. **1569 local proxy regression tests** and **[88 Windows runtime checks](https://github.com/yunhanhai/yunswitch/actions/runs/43592678793)** passed. See the [release record](docs/releases/3.20.1-yunswitch.8.md) for the evidence.
 
-These additions build on inherited code. In particular, the Responses ↔ Anthropic bridge core comes from upstream; this distribution adds the conversion interface, configuration and model handling, guards and integration tests around it.
+Windows packages are unsigned and automatic updates are disabled. Download updates from this project's releases above; read the [migration guide](docs/MIGRATION-YUNSWITCH.md) before reusing existing configurations.
 
-### Boundaries
+1. Install the MSI, or extract the portable ZIP and start YunSwitch.
+2. Add the provider's API URL, key and models. For routing or protocol bridging, start the local proxy and enable takeover for the relevant client.
+3. Configure groups, aliases and retry preferences as needed, then inspect the route, status and usage after a request.
 
-- Model aliases are configured mappings. Missing mappings or an empty filtered result preserve a fallback route; aliases do not prove provider capability.
-- Same-provider retries are off by default and capped at 10. They apply to connection failures and selected retryable statuses before a response is delivered. Delivered streams cannot be restarted; 429 and authentication failures follow other handling paths.
-- Bridged Claude → Codex configurations require the local proxy. Direct-mode candidates are selected using the model catalog and source-model presence; actual Responses support still needs a real request to verify.
-- Test totals in the historical development record describe checks on the previous machine. Validation for the current machine and release must be recorded separately.
+## Features
+
+Inherited capabilities include configuration management for Claude Code, Claude Desktop, Codex, Gemini CLI, Grok Build, OpenCode, OpenClaw and Hermes Agent, plus provider switching, MCP, Prompts, Skills, sessions, usage tracking, a local proxy and basic failover. See the [user manual](docs/user-manual/en/README.md) for client-specific capabilities and requirements.
+
+| Area                        | Main additions                                                                                                                  | Details                                                           |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Routing groups              | Per-app provider groups, enable/disable controls, ordering, effective route previews and health indicators                      | [Routing groups](docs/routing-groups.en.md)                       |
+| Model aliases               | Map logical models to provider-specific names on failover; suggest aliases from existing mappings                               | [Alias design and boundaries](docs/model-alias-routing-design.md) |
+| Gemini routing              | Apply aliases in model URL paths and record the selected provider and actual upstream model                                     | [Development record](docs/RELEASE-NOTES-P1-P6.md)                 |
+| Model catalogs              | Dynamic catalogs, caching and mapping assistance                                                                                | [User manual](docs/user-manual/en/README.md)                      |
+| Provider conversion         | Convert third-party Claude configurations to Codex, preserve source models, prevent duplicates and probe direct-mode candidates | [Conversion notes](docs/claude-to-codex-conversion.md)            |
+| Request recovery            | Bounded 429 waits, shared cooldowns and coordinated recovery; optional same-provider retries, failover and circuit status       | [Recovery behavior](docs/CODEX-STREAM-RECOVERY.md)                |
+| Codex history compatibility | Optional native Responses gateway repair, limited to protocol containers and protected state references                         | [Switch and scope](docs/CODEX-RESPONSES-COMPATIBILITY.md)         |
+| Maintenance                 | Preserve configuration fields and comments, isolate development/test directories and verify languages and loopback scenarios    | [Contributing](CONTRIBUTING.md)                                   |
+
+The Responses ↔ Anthropic bridge core comes from upstream. This project adds configuration conversion, model handling, operating guards and integration verification. Further open-source integrations follow the [roadmap](docs/DEVELOPMENT-ROADMAP.md).
 
 ## Preview
 
-This existing repository screenshot illustrates provider configuration and local routing. The current code determines the exact layout.
+Codex encrypted-history compatibility settings from the Windows x64 `.8` release acceptance. The switch is off by default; it was enabled for this check.
 
-![Provider and local routing example](docs/images/codex-kimi-routing/01-codex-providers-require-routing.png)
+![YunSwitch Codex encrypted-history compatibility settings](docs/images/yunswitch/codex-compatibility-windows-v3.20.1.8.png)
 
-## Getting the distribution
+## Usage boundaries
 
-The Windows x64 prerelease `3.20.1-yunswitch.8` is available as an installer and portable ZIP: [GitHub download](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.8) / [Gitee download](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.8). Installation, startup, mock proxy requests, synthetic migration, upgrade from `.7` and uninstall checks passed. The packages are unsigned and automatic updates are disabled. The upstream baseline remains v3.20.1. See the [release record](docs/releases/3.20.1-yunswitch.8.md) and [migration guide](docs/MIGRATION-YUNSWITCH.md).
+- Aliases are configured mappings and provider presets are starting points. Actual models, plans and long sessions need verification for each combination.
+- Same-provider retries are off by default and capped at 10. 429 waiting is a separate opt-in with count and duration limits. Delivered output or tool activity prevents automatic replay; native stateful Codex requests retain single-send protection.
+- Codex encrypted-history compatibility is off by default. It applies to API-key native Responses through the local proxy and can reduce replayed reasoning context. Official accounts/OAuth, protocol bridges and direct connections have different boundaries.
+- Claude → Codex bridging requires the local proxy. Direct-mode candidate selection does not verify actual Responses support.
 
-Version `.8` coordinates requests recovering from rate limits: one recovery attempt per application and provider at a time, with shared cooldown deadlines and bounded waiting. Cancellation releases the permit; live output streams do not hold it. Existing preferences are preserved. See [recovery limits](docs/CODEX-STREAM-RECOVERY.md), the [`.8` release record](docs/releases/3.20.1-yunswitch.8.md) and the [development roadmap](docs/DEVELOPMENT-ROADMAP.md).
+Read [request recovery](docs/CODEX-STREAM-RECOVERY.md) and [Codex compatibility](docs/CODEX-RESPONSES-COMPATIBILITY.md) for settings and behavior.
 
-The earlier [`.2` release](docs/releases/3.20.1-yunswitch.2.md) removed inherited referral links and commercial partner flags from built-in presets. Default sorting puts official entries first, then sorts the rest by display name; required compatibility identifiers remain. Existing user configurations are preserved. The first prerelease and its verification history remain documented in the [`.1` release record](docs/releases/3.20.1-yunswitch.1.md).
+## Documentation
 
-| Platform      | Verification                                                                                                                                                                                                       | Release status                                         |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------ |
-| Windows x64   | [Clean-runner installation checks](https://github.com/yunhanhai/yunswitch/actions/runs/43592678793) for portable ZIP and MSI, including UI startup, mock proxy requests, synthetic migration and upgrade from `.7` | Independent prerelease available                       |
-| macOS / Linux | [Source CI](https://github.com/yunhanhai/yunswitch/actions/runs/43592579771): frontend checks, platform backend tests and Clippy                                                                                   | No independent packages or installation acceptance yet |
-| ARM64         | No independent installation acceptance yet                                                                                                                                                                         | No independent packages published                      |
+| Task                                      | Guide                                                                                                                                                                                                      |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Configure clients and providers           | [User manual](docs/user-manual/en/README.md)                                                                                                                                                               |
+| Manage routes and model mappings          | [Routing index](docs/routing-groups.index.md) · [Model aliases](docs/model-alias-routing-design.md)                                                                                                        |
+| Convert existing provider configurations  | [Claude → Codex conversion](docs/claude-to-codex-conversion.md)                                                                                                                                            |
+| Route across providers                    | [Kimi with Codex](docs/guides/codex-kimi-routing-guide-en.md) · [Claude with Codex](docs/guides/codex-claude-routing-guide-en.md) · [Codex with Claude Code](docs/guides/claude-codex-routing-guide-en.md) |
+| Display models in Codex Desktop           | [Custom model visibility](docs/guides/codex-desktop-custom-model-visibility-en.md)                                                                                                                         |
+| Understand rate limits and history issues | [Request recovery](docs/CODEX-STREAM-RECOVERY.md) · [Encrypted-history compatibility](docs/CODEX-RESPONSES-COMPATIBILITY.md)                                                                               |
+| Migrate or upgrade                        | [Migration guide](docs/MIGRATION-YUNSWITCH.md) · [Current release record](docs/releases/3.20.1-yunswitch.8.md)                                                                                             |
+| Review plans and provenance               | [Roadmap](docs/DEVELOPMENT-ROADMAP.md) · [Project notes](docs/PROJECT.md) · [Source ledger](docs/PROVENANCE.md)                                                                                            |
 
-These records cover the `.8` prerelease source and packages. Built-in presets are configuration starting points. Real paid-provider connectivity and private-data migration have not been verified across all providers and platforms. See the [validation scope](docs/PROJECT.md#供应商目录维护与验证范围).
-
-- [Gitee repository](https://gitee.com/yunhanhai/yunswitch)
-- [GitHub Releases](https://github.com/yunhanhai/yunswitch/releases)
-- [Version and release plan](docs/PROJECT.md)
-
-The typical flow is to add a provider, enable local routing when the client requires it, configure groups and aliases, and inspect the resulting route and usage. Read the relevant guide before using a provider that requires protocol conversion.
-
-Useful documentation:
-
-- [User manual](docs/user-manual/en/README.md)
-- [Routing documentation index](docs/routing-groups.index.md)
-- [Claude → Codex configuration conversion](docs/claude-to-codex-conversion.md)
-- [Kimi with Codex](docs/guides/codex-kimi-routing-guide-en.md)
-- [Claude with Codex](docs/guides/codex-claude-routing-guide-en.md)
-- [Codex with Claude Code](docs/guides/claude-codex-routing-guide-en.md)
-- [Custom models in Codex Desktop](docs/guides/codex-desktop-custom-model-visibility-en.md)
-
-Inherited installation instructions in older manuals and release notes are historical references. Follow this distribution's own release instructions when installing its packages.
+The [changelog](CHANGELOG.md) links to previous versions and their verification records. Upstream installation instructions in older manuals are historical references; use this project's releases for installation and updates. Some detailed development and compatibility documents are in Chinese.
 
 ## Development
 
@@ -120,12 +124,12 @@ You can also clone `https://github.com/yunhanhai/yunswitch.git`. When using Core
 
 ## Contributing and next steps
 
-Use [Gitee Issues](https://gitee.com/yunhanhai/yunswitch/issues) or [GitHub Issues](https://github.com/yunhanhai/yunswitch/issues) for questions and suggestions. Read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting code and [SECURITY.md](SECURITY.md) for security reports.
+The project currently has one maintainer. Use [Gitee Issues](https://gitee.com/yunhanhai/yunswitch/issues) or [GitHub Issues](https://github.com/yunhanhai/yunswitch/issues) for questions and suggestions. Read [CONTRIBUTING.md](CONTRIBUTING.md) for code contributions and [SECURITY.md](SECURITY.md) for security reports.
 
-Planned work includes further independently verified releases, client/provider compatibility checks, and integrations with other projects that clearly record their source and license. See the [maintenance plan](docs/PROJECT.md).
+Next priorities are redacted request diagnostics and understandable waiting states, followed by real-provider and long-session verification, protocol scenarios and platform releases. The [roadmap](docs/DEVELOPMENT-ROADMAP.md) defines their order and acceptance criteria.
 
 ## Attribution and license
 
-Thanks to [the upstream CC Switch project](https://github.com/farion1231/cc-switch), original author Jason Young, and its contributors and dependencies.
+Thanks to [the upstream CC Switch project](https://github.com/farion1231/cc-switch), original author Jason Young, contributors and dependencies.
 
-This distribution remains under **MIT**, preserving the upstream copyright and permission notice and adding attribution for modifications and additions by yunhanhai. See [LICENSE](LICENSE) for the full terms.
+This project remains under **MIT**, preserving upstream copyright and permission notices and adding attribution for changes by yunhanhai. See [LICENSE](LICENSE) and the [source ledger](docs/PROVENANCE.md).

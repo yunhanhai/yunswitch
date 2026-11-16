@@ -2,90 +2,94 @@
 
 # YunSwitch
 
-AI 编程工具配置与路由管理，面向多供应商与多模型场景持续改进。
+AI 编程工具配置与路由管理，统一管理多供应商、多模型与本地代理。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2-orange.svg)](https://tauri.app/)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#开发与构建)
+[![Windows x64 prerelease](https://img.shields.io/badge/Windows_x64-Prerelease-blue.svg)](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.8)
 
 [English](README.md) | 中文 | [日本語](README_JA.md) | [Deutsch](README_DE.md)
+
+[下载与快速开始](#下载与快速开始) · [核心功能](#核心功能) · [文档导航](#文档导航) · [开发路线](docs/DEVELOPMENT-ROADMAP.md)
 
 [Gitee](https://gitee.com/yunhanhai/yunswitch) · [GitHub](https://github.com/yunhanhai/yunswitch) · [项目说明](docs/PROJECT.md) · [更新记录](CHANGELOG.md)
 
 </div>
 
+> **项目支持 · [艺の公益站](https://ultrarouter.org/sign-up?aff=KnwD)**
+>
+> 感谢艺の公益站为 YunSwitch 提供支持。上方为推广注册链接。
+
 ## 项目介绍
 
-本项目由 **yunhanhai 独立维护**，基于 [farion1231/cc-switch](https://github.com/farion1231/cc-switch) 的 **v3.20.1** 继续开发。除继承的配置管理与代理能力外，已加入路由分组、跨供应商模型别名、模型目录辅助、Claude → Codex 供应商配置转换及请求韧性增强。
+YunSwitch 帮助你管理 Claude Code、Codex、Gemini CLI 等工具的供应商配置，并通过本地代理组织路由、映射模型和处理可恢复的请求故障。
 
-项目目前由一人维护，后续会根据实际需求吸收其他开源项目的优点，持续完善供应商接入、路由体验和稳定性。代码来源、已有增强与后续计划见 [项目说明](docs/PROJECT.md)。上游版权与 MIT 许可保留在 [LICENSE](LICENSE) 中，本仓库新增与修改部分另行署名。
+本项目由 **yunhanhai 独立维护**，基于 [CC Switch v3.20.1](https://github.com/farion1231/cc-switch) 持续二次开发。路由分组、跨供应商模型别名、供应商配置转换及请求恢复增强属于本仓库的主要改进；代码来源与许可记录见[项目说明](docs/PROJECT.md)和[来源台账](docs/PROVENANCE.md)。
 
-**本仓库入口以这里的 Gitee / GitHub 为准。** 上游官网、安装包、包管理源与赞助关系属于原项目；本版本的发布与支持由本仓库维护者负责。
+## 下载与快速开始
 
-## 已有功能与本仓库增强
+当前版本：**`3.20.1-yunswitch.8` Windows x64 预发布**，提供 MSI 安装版与免安装 ZIP。
 
-继承的基础能力包括 Claude Code、Claude Desktop、Codex、Gemini CLI、Grok Build、OpenCode、OpenClaw 和 Hermes Agent 的配置管理，以及供应商切换、MCP、Prompts、Skills、会话管理、用量统计、本地代理和基础故障转移。各客户端的具体能力与运行要求见 [用户手册](docs/user-manual/zh/README.md)。
+| 平台          | 获取方式与验证状态                                                                                                                                                                                            |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Windows x64   | [Gitee 下载](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.8) · [GitHub 下载](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.8)；安装、从 `.7` 升级与卸载已验收 |
+| macOS / Linux | [源码 CI](https://github.com/yunhanhai/yunswitch/actions/runs/43592579771)通过，尚无独立安装包及安装验收                                                                                                      |
+| ARM64         | 尚无独立安装包或安装验收                                                                                                                                                                                      |
 
-以下是相对 v3.20.1 基线的主要增强：
+本版协调已限流请求的恢复顺序，动态遵守共享冷却期限，并限制排队和等待时长。本机 **1569 项代理回归**及 **[88 项 Windows 运行检查](https://github.com/yunhanhai/yunswitch/actions/runs/43592678793)**通过，完整记录见[本次发布说明](docs/releases/3.20.1-yunswitch.8.md)。
 
-| 方向        | 本仓库已实现的增强                                                                       | 使用说明                                             |
-| ----------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| 路由分组    | 按应用组织供应商，分组启停、组内排序、生效路由预览与健康状态展示                         | [路由分组](docs/routing-groups.md)                   |
-| 模型别名    | 将同一逻辑模型映射到不同渠道的物理模型名，故障转移时随供应商切换；从已有映射生成归并建议 | [别名设计与边界](docs/model-alias-routing-design.md) |
-| Gemini 路由 | 同步处理 URL 路径中的模型别名、选路与实际发送模型的记录                                  | [开发记录 P1–P6](docs/RELEASE-NOTES-P1-P6.md)        |
-| 模型目录    | 动态模型目录、缓存与模型映射辅助，减少手工填写成本                                       | [用户手册](docs/user-manual/zh/README.md)            |
-| 供应商转换  | Claude 第三方供应商转换为 Codex 配置，搬运源模型、防止重复创建，并探测直连候选           | [转换说明](docs/claude-to-codex-conversion.md)       |
-| 请求韧性    | 429 等待与冷却观测、熔断状态展示；可先重试同一供应商，再走故障转移                       | [开发记录追加篇章](docs/RELEASE-NOTES-P1-P6.md)      |
-| 维护与验证  | 配置字段/注释保留、开发与测试目录隔离、四语一致性检查，以及路由与转换回环测试            | [贡献指南](CONTRIBUTING.md)                          |
+Windows 包尚未配置发布者签名，自动更新关闭。更新时请从上方本项目发布入口下载；使用旧配置前先阅读[数据迁移指南](docs/MIGRATION-YUNSWITCH.md)。
 
-这些增强建立在上游已有实现之上。例如 Responses 与 Anthropic 的协议桥接核心来自上游，本仓库补充的是转换入口、配置与模型处理、运行条件判断及整链测试。
+1. 下载 MSI 安装包，或解压免安装 ZIP 后启动 YunSwitch。
+2. 添加供应商的 API 地址、密钥与模型；需要协议桥接或路由时，启动本地代理并启用对应客户端接管。
+3. 按需配置路由分组、模型别名和重试策略，发起请求后查看实际路由、状态与用量。
 
-### 需要了解的边界
+## 核心功能
 
-- 模型别名是配置映射；未配置或筛选结果为空时保留回退链，不能视为供应商真实能力检测。
-- 同供应商重试默认关闭，最多 10 次，只覆盖连接失败及部分可重试状态码；已经交付给客户端的流不能重新发送。429、认证错误等另行处理。
-- Claude → Codex 的桥接模式需要启动本地路由。直连候选依据模型目录与源模型是否存在判断，仍需要用实际请求验证 Responses 支持。
-- 历史开发记录中的测试成绩属于旧电脑的验证结果，当前平台与发布版本的验证应单独记录。
+继承的基础能力包括 Claude Code、Claude Desktop、Codex、Gemini CLI、Grok Build、OpenCode、OpenClaw 和 Hermes Agent 的配置管理，以及供应商切换、MCP、Prompts、Skills、会话管理、用量统计、本地代理和基础故障转移。各客户端的具体能力与要求见[用户手册](docs/user-manual/zh/README.md)。
+
+| 方向           | 本仓库的主要增强                                                                    | 使用说明                                                    |
+| -------------- | ----------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| 路由分组       | 按应用组织供应商，分组启停、组内排序、生效路由预览与健康状态                        | [路由分组](docs/routing-groups.md)                          |
+| 模型别名       | 将逻辑模型映射到不同渠道的物理模型名，故障转移时同步切换；从已有映射生成归并建议    | [别名设计与边界](docs/model-alias-routing-design.md)        |
+| Gemini 路由    | 同步处理 URL 路径中的模型别名、选路与实际发送模型的记录                             | [开发记录](docs/RELEASE-NOTES-P1-P6.md)                     |
+| 模型目录       | 动态模型目录、缓存与模型映射辅助，减少手工填写                                      | [用户手册](docs/user-manual/zh/README.md)                   |
+| 供应商转换     | Claude 第三方供应商转换为 Codex 配置，保留源模型、防止重复创建，并探测直连候选      | [转换说明](docs/claude-to-codex-conversion.md)              |
+| 请求恢复       | 429 等待、共享冷却与恢复协调，同供应商有限重试、故障转移及熔断状态展示              | [恢复说明](docs/CODEX-STREAM-RECOVERY.md)                   |
+| Codex 历史兼容 | 可选开关处理部分原生 Responses 网关的加密历史兼容问题，按协议容器清理并保护状态引用 | [兼容开关与适用范围](docs/CODEX-RESPONSES-COMPATIBILITY.md) |
+| 维护与验证     | 保留配置字段与注释，隔离开发和测试目录，验证多语言及路由、转换回环场景              | [贡献指南](CONTRIBUTING.md)                                 |
+
+Responses 与 Anthropic 协议桥接核心继承自上游；本仓库补充配置转换入口、模型处理、运行条件判断及整链验证。其他开源能力会按[开发路线](docs/DEVELOPMENT-ROADMAP.md)逐项整合。
 
 ## 界面预览
 
-以下为仓库已有截图，具体布局以当前代码为准。
+Windows x64 `.8` 发布验收中的 Codex 加密历史兼容设置。该开关默认关闭，图中为验收时启用后的状态。
 
-![供应商与本地路由示例](docs/images/codex-kimi-routing/01-codex-providers-require-routing.png)
+![YunSwitch Codex 加密历史兼容设置](docs/images/yunswitch/codex-compatibility-windows-v3.20.1.8.png)
 
-## 获取与使用
+## 使用边界
 
-Windows x64 预发布 `3.20.1-yunswitch.8` 已提供安装版与免安装版：[GitHub 下载](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.8) / [Gitee 下载](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.8)。上游基线仍为 v3.20.1。安装、启动、模拟代理请求、合成数据迁移、从 `.7` 升级和卸载验收通过；当前未配置 Windows 发布者签名，自动更新关闭。详见[本次发布记录](docs/releases/3.20.1-yunswitch.8.md)与[数据迁移指南](docs/MIGRATION-YUNSWITCH.md)。
+- 模型别名属于配置映射，供应商预设属于配置起点；真实模型、套餐和长会话需按实际组合验证。
+- 同供应商重试默认关闭，最多 10 次；429 等待也需单独开启，并受次数和单次等待上限约束。已有输出或工具活动后不自动重放，原生状态型 Codex 请求保留一次发送保护。
+- Codex 加密历史兼容默认关闭，适用于经过本地代理、使用 API Key 的原生 Responses 请求，可能减少可回放的推理上下文；官方账号/OAuth、跨协议路径和直接连接有不同边界。
+- Claude → Codex 桥接需要本地路由。直连候选判断不等于实际 Responses 支持验证。
 
-本版协调已经遇到限流的请求：每应用/供应商逐个进行输出前恢复，动态遵守共享冷却期限，排队及期限延长受等待上限约束，取消会释放许可。便携和升级后程序均已验收，见[恢复说明](docs/CODEX-STREAM-RECOVERY.md)、[`.8` 发布记录](docs/releases/3.20.1-yunswitch.8.md)与[开发路线](docs/DEVELOPMENT-ROADMAP.md)。
+具体行为与设置入口见[请求恢复](docs/CODEX-STREAM-RECOVERY.md)和[Codex 兼容说明](docs/CODEX-RESPONSES-COMPATIBILITY.md)。
 
-早期版本[`.2`](docs/releases/3.20.1-yunswitch.2.md)已清理内置推广链接与商业合作标记，默认排序为官方预设优先、其余按显示名称排序；必要的供应商识别与兼容字段保留，已有用户配置不执行清洗。首个独立预发布及其历史验收记录保留在[`.1` 发布记录](docs/releases/3.20.1-yunswitch.1.md)。
+## 文档导航
 
-| 平台          | 验证范围                                                                                                                                                    | 发布状态             |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
-| Windows x64   | [干净 runner 安装验收](https://github.com/yunhanhai/yunswitch/actions/runs/43592678793)：便携 ZIP 与 MSI 的界面启动、模拟代理请求、合成数据迁移与 `.7` 升级 | 已发布独立预览包     |
-| macOS / Linux | [源码 CI](https://github.com/yunhanhai/yunswitch/actions/runs/43592579771)：前端检查、各平台后端测试与 Clippy                                               | 尚无独立包及安装验收 |
-| ARM64         | 尚无独立安装验收                                                                                                                                            | 尚未发布独立包       |
+| 你想做什么                  | 文档                                                                                                                                                                                                       |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 配置客户端与供应商          | [用户手册](docs/user-manual/zh/README.md)                                                                                                                                                                  |
+| 管理路由与模型映射          | [路由文档导航](docs/routing-groups.index.md) · [模型别名](docs/model-alias-routing-design.md)                                                                                                              |
+| 转换已有供应商配置          | [Claude → Codex 配置转换](docs/claude-to-codex-conversion.md)                                                                                                                                              |
+| 使用跨供应商路由            | [Codex 接入 Kimi](docs/guides/codex-kimi-routing-guide-zh.md) · [Codex 接入 Claude](docs/guides/codex-claude-routing-guide-zh.md) · [Claude Code 接入 Codex](docs/guides/claude-codex-routing-guide-zh.md) |
+| 在 Codex Desktop 中显示模型 | [自定义模型显示](docs/guides/codex-desktop-custom-model-visibility-zh.md)                                                                                                                                  |
+| 处理限流或历史兼容问题      | [请求恢复](docs/CODEX-STREAM-RECOVERY.md) · [加密历史兼容](docs/CODEX-RESPONSES-COMPATIBILITY.md)                                                                                                          |
+| 迁移与升级                  | [数据迁移指南](docs/MIGRATION-YUNSWITCH.md) · [当前发布记录](docs/releases/3.20.1-yunswitch.8.md)                                                                                                          |
+| 了解开发计划与来源          | [开发路线](docs/DEVELOPMENT-ROADMAP.md) · [项目说明](docs/PROJECT.md) · [来源台账](docs/PROVENANCE.md)                                                                                                     |
 
-以上记录对应 `.8` 预发布源码和安装包。内置预设是配置起点，尚未统一验证所有真实付费供应商的连通性与用户私有数据迁移。详见[验证范围](docs/PROJECT.md#供应商目录维护与验证范围)。
-
-- [Gitee 仓库](https://gitee.com/yunhanhai/yunswitch)
-- [GitHub Releases](https://github.com/yunhanhai/yunswitch/releases)
-- [版本与发布计划](docs/PROJECT.md#当前版本与发布状态)
-
-基本流程：添加供应商配置 → 按客户端需要启用本地路由 → 设置路由分组与模型别名 → 发起请求并查看路由和用量结果。需要协议转换的供应商，请先阅读相应指南。
-
-常用文档：
-
-- [用户手册](docs/user-manual/zh/README.md)
-- [路由分组文档导航](docs/routing-groups.index.md)
-- [Claude → Codex 配置转换](docs/claude-to-codex-conversion.md)
-- [Codex 接入 Kimi](docs/guides/codex-kimi-routing-guide-zh.md)
-- [Codex 接入 Claude](docs/guides/codex-claude-routing-guide-zh.md)
-- [Claude Code 接入 Codex](docs/guides/claude-codex-routing-guide-zh.md)
-- [Codex Desktop 自定义模型显示](docs/guides/codex-desktop-custom-model-visibility-zh.md)
-
-手册与旧版发布说明中保留的上游安装信息供历史参考；安装本仓库版本时，以本仓库实际发布说明为准。
+[更新记录](CHANGELOG.md)保留各版本变化与历史验证入口。旧手册和开发记录中的上游安装信息供历史参考，安装与更新以本项目实际发布说明为准。
 
 ## 开发与构建
 
@@ -124,12 +128,12 @@ GitHub 也可以作为克隆来源：`https://github.com/yunhanhai/yunswitch.git
 
 ## 参与与后续计划
 
-问题与建议请提交到 [Gitee Issues](https://gitee.com/yunhanhai/yunswitch/issues) 或 [GitHub Issues](https://github.com/yunhanhai/yunswitch/issues)，代码贡献请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。安全问题按 [SECURITY.md](SECURITY.md) 联系维护者。
+本项目目前由一人维护，欢迎通过 [Gitee Issues](https://gitee.com/yunhanhai/yunswitch/issues) 或 [GitHub Issues](https://github.com/yunhanhai/yunswitch/issues) 提交问题与建议。代码贡献见[贡献指南](CONTRIBUTING.md)，安全问题按[安全政策](SECURITY.md)联系维护者。
 
-后续重点是继续验收与发布独立版本、更多客户端和供应商兼容性验证，以及有明确来源记录的跨项目能力整合。具体待办见 [维护计划](docs/PROJECT.md#后续调整)。
+下一阶段优先补齐脱敏请求诊断与等待状态，再验证真实供应商、长会话、协议转换和平台发布。具体顺序与完成标准见[开发路线](docs/DEVELOPMENT-ROADMAP.md)。
 
 ## 来源与许可证
 
-感谢 [CC Switch 上游项目](https://github.com/farion1231/cc-switch) 与原作者 Jason Young 提供基础实现，也感谢相关依赖和贡献者。
+感谢 [CC Switch 上游项目](https://github.com/farion1231/cc-switch)、原作者 Jason Young、相关依赖与贡献者。
 
-本仓库基于 **MIT** 许可证继续开放，保留上游版权与许可文字，补充 yunhanhai 对新增和修改部分的署名。完整条款见 [LICENSE](LICENSE)。
+本仓库继续使用 **MIT** 许可证，保留上游版权与许可文字，补充 yunhanhai 对新增和修改部分的署名。完整条款见 [LICENSE](LICENSE)，第三方来源见[来源台账](docs/PROVENANCE.md)。

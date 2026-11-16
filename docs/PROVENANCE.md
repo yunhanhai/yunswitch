@@ -39,6 +39,12 @@ CodexBar 对应的公开参考文件为 [GrokAuth.swift](https://github.com/stei
 
 HTTP 解码接线、预算和取消管理由本项目实现，位于 `src-tauri/src/proxy/response_decompression.rs`；未复制其他代理框架。通知与许可加入 MSI/绿色包，实际随包内容由 Windows 验收检查。此记录仅覆盖本次新增来源。
 
+## 本项目发布验收截图
+
+2026-11-16，四语言 README 的界面预览使用 [Windows x64 `.8` 发布验收](https://github.com/yunhanhai/yunswitch/actions/runs/43592678793)中的 `installed-after-upgrade.png`，产品与验收源码为 `0a38764c9126f3aed3ba2f07d9e07e7a5d7476ce`。图片按原始字节保存至 [codex-compatibility-windows-v3.20.1.8.png](images/yunswitch/codex-compatibility-windows-v3.20.1.8.png)，SHA-256 为 `9de6b27b65ce7430220369922a4b94702774d518cd7e38f95266cf625a1b4049`。
+
+截图由本项目在干净 Windows runner 中运行合成数据验收时生成，按本仓库 MIT 许可随文档提供；图中 Codex 加密历史兼容开关为验收时启用，默认设置仍为关闭。图像未修改、未包含个人配置或密钥，也未引入其他网站的图标或宣传素材。原验收与发布记录见[`.8` 说明](releases/3.20.1-yunswitch.8.md)。
+
 ## 文档与设计参考
 
 [RuoYi](https://gitee.com/y_project/RuoYi)、[RuoYi-Vue-Plus](https://gitee.com/dromara/RuoYi-Vue-Plus) 和 [RuoYi-Vue-Pro](https://gitee.com/zhijiantianya/ruoyi-vue-pro) 用于参考如何说明上游关系、独立维护主体和功能差异；当前没有因此新增这些项目的框架代码。今后若引入代码或资源，应新增对应条目，核查所选版本的许可证，不能沿用“仅参考”的描述。
