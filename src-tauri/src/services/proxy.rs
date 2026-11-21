@@ -6,6 +6,7 @@ use crate::app_config::AppType;
 use crate::config::{get_claude_settings_path, read_json_file, write_json_file};
 use crate::database::Database;
 use crate::provider::Provider;
+use crate::proxy::diagnostics::{Detail, Diagnostics, Snapshot};
 use crate::proxy::providers::codex_oauth_auth::CodexOAuthManager;
 use crate::proxy::server::ProxyServer;
 use crate::proxy::switch_lock::SwitchLockManager;
@@ -390,6 +391,7 @@ pub struct ProxyService {
     db: Arc<Database>,
     codex_oauth_manager: Arc<CodexOAuthManager>,
     server: Arc<RwLock<Option<ProxyServer>>>,
+    diagnostics: Arc<RwLock<Option<Arc<Diagnostics>>>>,
     /// AppHandle，用于传递给 ProxyServer 以支持故障转移时的 UI 更新
     app_handle: Arc<RwLock<Option<tauri::AppHandle>>>,
     switch_locks: SwitchLockManager,
@@ -416,6 +418,7 @@ impl ProxyService {
             db,
             codex_oauth_manager,
             server: Arc::new(RwLock::new(None)),
+            diagnostics: Arc::new(RwLock::new(None)),
             app_handle: Arc::new(RwLock::new(None)),
             switch_locks: SwitchLockManager::new(),
         }
@@ -984,6 +987,7 @@ impl ProxyService {
         }
 
         // 5. 保存服务器实例
+        *self.diagnostics.write().await = Some(server.diagnostics());
         *self.server.write().await = Some(server);
 
         log::info!("代理服务器已启动: {}:{}", info.address, info.port);
@@ -3860,6 +3864,22 @@ impl ProxyService {
         }
     }
 
+    pub(crate) async fn request_diagnostics(&self) -> Snapshot {
+        self.diagnostics
+            .read()
+            .await
+            .as_ref()
+            .map_or_else(Snapshot::default, |diagnostics| diagnostics.snapshot())
+    }
+
+    pub(crate) async fn request_diagnostic_detail(&self, id: &str) -> Option<Detail> {
+        self.diagnostics
+            .read()
+            .await
+            .as_ref()
+            .and_then(|diagnostics| diagnostics.detail(id))
+    }
+
     /// 获取代理配置
     pub async fn get_config(&self) -> Result<ProxyConfig, String> {
         self.db
@@ -3918,6 +3938,7 @@ impl ProxyService {
                 return Err(e);
             }
 
+            *self.diagnostics.write().await = Some(new_server.diagnostics());
             *server_guard = Some(new_server);
             log::info!("代理配置已更新，服务器已自动重启应用最新配置");
 

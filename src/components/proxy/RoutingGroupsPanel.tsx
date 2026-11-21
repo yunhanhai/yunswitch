@@ -81,10 +81,11 @@ export function RoutingGroupsPanel({
     [cooldowns],
   );
   const { data: proxyStatus } = useProxyStatusQuery();
-  const waitingProviderId =
-    proxyStatus?.rate_limit_waiting?.appType === appType
-      ? (proxyStatus.rate_limit_waiting.providerId as string)
-      : null;
+  const waitingProviderIds = new Set(
+    proxyStatus?.rate_limit_waiting_requests
+      ?.filter((wait) => wait.appType === appType)
+      .map((wait) => wait.providerId),
+  );
   const effectiveRoute = useMemo(() => {
     const enabledGroups = groups.filter((g) => g.group.enabled);
     const providerIds = enabledGroups.flatMap((g) =>
@@ -259,7 +260,7 @@ export function RoutingGroupsPanel({
                       )?.name ?? m.providerId;
                     const isP1 = idx === 1;
                     const cooldownSecs = cooldownMap.get(m.providerId) ?? 0;
-                    const isWaiting = waitingProviderId === m.providerId;
+                    const isWaiting = waitingProviderIds.has(m.providerId);
                     const health = providerHealthMap.get(m.providerId);
                     const isUnhealthy =
                       health != null && health.is_healthy === false;
@@ -547,7 +548,7 @@ export function RoutingGroupsPanel({
                               }
                               isP1={effectiveFirstProviderId === m.providerId}
                               cooldownSecs={cooldownMap.get(m.providerId) ?? 0}
-                              isWaiting={waitingProviderId === m.providerId}
+                              isWaiting={waitingProviderIds.has(m.providerId)}
                               health={
                                 providerHealthMap.get(m.providerId) ?? null
                               }

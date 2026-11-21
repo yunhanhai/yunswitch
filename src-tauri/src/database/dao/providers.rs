@@ -17,6 +17,16 @@ type OmoProviderRow = (
 );
 
 impl Database {
+    pub(crate) fn list_provider_labels(
+        &self,
+        app_type: &str,
+    ) -> Result<Vec<(String, String)>, AppError> {
+        let conn = lock_conn!(self.conn);
+        let mut stmt = conn.prepare("SELECT id, name FROM providers WHERE app_type = ?1")?;
+        let rows = stmt.query_map(params![app_type], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect::<Result<_, _>>().map_err(AppError::from)
+    }
+
     pub fn get_all_providers(
         &self,
         app_type: &str,

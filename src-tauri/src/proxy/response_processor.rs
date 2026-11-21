@@ -728,7 +728,7 @@ pub fn create_logged_passthrough_stream(
                             // 超时
                             let timeout_type = if is_first_chunk { "首字节" } else { "静默期" };
                             log::error!("[{tag}] 流式响应{}超时 ({}秒)", timeout_type, duration.as_secs());
-                            yield Err(std::io::Error::other(format!("流式响应{timeout_type}超时")));
+                            yield Err(std::io::Error::new(std::io::ErrorKind::TimedOut, format!("流式响应{timeout_type}超时")));
                             break;
                         }
                     }
@@ -783,8 +783,8 @@ pub fn create_logged_passthrough_stream(
                     yield Ok(bytes);
                 }
                 Some(Err(e)) => {
-                    log::error!("[{tag}] 流错误: {e}");
-                    yield Err(std::io::Error::other(e.to_string()));
+                    log::error!("[{tag}] 流式响应中断 ({:?})", e.kind());
+                    yield Err(e);
                     break;
                 }
                 None => {
@@ -1020,6 +1020,7 @@ mod tests {
 
     fn build_state(db: Arc<Database>) -> ProxyState {
         ProxyState {
+            diagnostics: Default::default(),
             db: db.clone(),
             config: Arc::new(RwLock::new(ProxyConfig::default())),
             status: Arc::new(RwLock::new(ProxyStatus::default())),

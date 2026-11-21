@@ -655,6 +655,7 @@ mod tests {
 
         fn build_state(db: Arc<Database>) -> ProxyState {
             ProxyState {
+                diagnostics: Default::default(),
                 db: db.clone(),
                 config: Arc::new(RwLock::new(ProxyConfig::default())),
                 status: Arc::new(RwLock::new(ProxyStatus::default())),
@@ -903,6 +904,7 @@ mod tests {
 
         fn build_state(db: Arc<Database>) -> ProxyState {
             ProxyState {
+                diagnostics: Default::default(),
                 db: db.clone(),
                 config: Arc::new(RwLock::new(ProxyConfig::default())),
                 status: Arc::new(RwLock::new(ProxyStatus::default())),

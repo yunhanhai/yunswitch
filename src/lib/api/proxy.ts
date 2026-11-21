@@ -6,6 +6,10 @@ import type {
   GlobalProxyConfig,
   AppProxyConfig,
 } from "@/types/proxy";
+import type {
+  RequestDetail,
+  RequestDiagnosticsSnapshot,
+} from "@/types/requestDiagnostics";
 
 export const proxyApi = {
   // ========== 代理服务器控制 API ==========
@@ -28,6 +32,20 @@ export const proxyApi = {
   // 获取代理服务器状态
   async getProxyStatus(): Promise<ProxyStatus> {
     return invoke("get_proxy_status");
+  },
+
+  async getRequestDiagnostics(): Promise<RequestDiagnosticsSnapshot> {
+    return invoke("get_request_diagnostics");
+  },
+
+  async getRequestDiagnosticDetail(id: string): Promise<RequestDetail | null> {
+    return invoke("get_request_diagnostic_detail", { id });
+  },
+
+  async getRequestDiagnosticProviderLabels(
+    id: string,
+  ): Promise<Record<string, string>> {
+    return invoke("get_request_diagnostic_provider_labels", { id });
   },
 
   // ========== 接管状态 API ==========
