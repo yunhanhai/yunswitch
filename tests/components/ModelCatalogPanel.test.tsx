@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "i18next";
 import { ModelCatalogPanel } from "@/components/providers/forms/ModelCatalogPanel";
@@ -142,6 +142,46 @@ describe("ModelCatalogPanel stale refresh", () => {
     await waitFor(() => expect(getModelCatalog).toHaveBeenCalledTimes(2));
     expect(vi.mocked(getModelCatalog).mock.calls[1]?.[1]).toBe(
       rotatedCredential,
+    );
+  });
+
+  it("ignores a late result from the previous credential", async () => {
+    let resolvePrevious!: (value: ModelCatalogSnapshot) => void;
+    const previousRequest = new Promise<ModelCatalogSnapshot>((resolve) => {
+      resolvePrevious = resolve;
+    });
+    vi.mocked(getModelCatalog)
+      .mockReturnValueOnce(previousRequest)
+      .mockResolvedValueOnce(snapshot([freshModel], false));
+    const onSnapshotChange = vi.fn();
+    const { rerender } = render(
+      <ModelCatalogPanel
+        baseUrl="http://127.0.0.1:1/v1"
+        apiKey="previous-synthetic-key"
+        onSnapshotChange={onSnapshotChange}
+      />,
+    );
+    await waitFor(() => expect(getModelCatalog).toHaveBeenCalledTimes(1));
+
+    rerender(
+      <ModelCatalogPanel
+        baseUrl="http://127.0.0.1:1/v1"
+        apiKey="current-synthetic-key"
+        onSnapshotChange={onSnapshotChange}
+      />,
+    );
+    expect(
+      await screen.findByText("synthetic-new-model", {}, { timeout: 4000 }),
+    ).toBeVisible();
+    await waitFor(() => expect(getModelCatalog).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      resolvePrevious(snapshot([oldModel], false));
+    });
+    expect(screen.queryByText("synthetic-old-model")).not.toBeInTheDocument();
+    expect(screen.getByText("synthetic-new-model")).toBeVisible();
+    expect(onSnapshotChange).toHaveBeenLastCalledWith(
+      snapshot([freshModel], false),
     );
   });
 });

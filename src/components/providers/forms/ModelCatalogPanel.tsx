@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Copy, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
@@ -158,6 +165,14 @@ export function ModelCatalogPanel({
   const lastAutoFetchKeyRef = useRef<string | null>(null);
   const credentialFingerprintRef = useRef<string | null>(null);
   const snapshotRef = useRef<ModelCatalogSnapshot | null>(null);
+  const requestGenerationRef = useRef(0);
+  useLayoutEffect(() => {
+    requestGenerationRef.current += 1;
+    setLoading(false);
+    return () => {
+      requestGenerationRef.current += 1;
+    };
+  }, [baseUrl, apiKey, isFullUrl, modelsUrl, apiFormat]);
   useEffect(() => {
     snapshotRef.current = snapshot;
   }, [snapshot]);
@@ -182,6 +197,7 @@ export function ModelCatalogPanel({
   const doFetch = useCallback(
     async (force: boolean) => {
       if (!baseUrl.trim() || !apiKey.trim()) return null;
+      const requestGeneration = ++requestGenerationRef.current;
       setLoading(true);
       try {
         const data = force
@@ -201,10 +217,12 @@ export function ModelCatalogPanel({
               undefined,
               { apiFormat },
             );
+        if (requestGeneration !== requestGenerationRef.current) return null;
         setSnapshot(data);
         onSnapshotChange?.(data);
         return data;
       } catch (e) {
+        if (requestGeneration !== requestGenerationRef.current) return null;
         const prev = snapshotRef.current;
         const fallback: ModelCatalogSnapshot = prev
           ? { ...prev, vendorError: String(e) }
@@ -219,7 +237,9 @@ export function ModelCatalogPanel({
         onSnapshotChange?.(fallback);
         return fallback;
       } finally {
-        setLoading(false);
+        if (requestGeneration === requestGenerationRef.current) {
+          setLoading(false);
+        }
       }
     },
     [baseUrl, apiKey, isFullUrl, modelsUrl, apiFormat, onSnapshotChange],
