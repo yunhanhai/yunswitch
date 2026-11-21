@@ -1247,7 +1247,8 @@ impl RequestForwarder {
                                 }
                                 Err(retry_err) => {
                                     log::warn!(
-                                        "[{app_type_str}] [Media] Unsupported-image retry still failed: {retry_err}"
+                                        "[{app_type_str}] [Media] Unsupported-image retry still failed: {}",
+                                        summarize_proxy_error(&retry_err)
                                     );
                                     if let Some(err) = self
                                         .handle_rectifier_retry_failure(
@@ -1405,7 +1406,8 @@ impl RequestForwarder {
                                     }
                                     Err(retry_err) => {
                                         log::warn!(
-                                            "[{app_type_str}] [RECT-003] 整流重试仍失败: {retry_err}"
+                                            "[{app_type_str}] [RECT-003] 整流重试仍失败: {}",
+                                            summarize_proxy_error(&retry_err)
                                         );
                                         if let Some(err) = self
                                             .handle_rectifier_retry_failure(
@@ -1563,7 +1565,8 @@ impl RequestForwarder {
                                 }
                                 Err(retry_err) => {
                                     log::warn!(
-                                        "[{app_type_str}] [RECT-012] budget 整流重试仍失败: {retry_err}"
+                                        "[{app_type_str}] [RECT-012] budget 整流重试仍失败: {}",
+                                        summarize_proxy_error(&retry_err)
                                     );
                                     if let Some(err) = self
                                         .handle_rectifier_retry_failure(
