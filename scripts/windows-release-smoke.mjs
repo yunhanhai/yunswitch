@@ -471,6 +471,179 @@ async function exerciseProxy(cdp) {
   mock = undefined;
 }
 
+async function exerciseModelCatalog(cdp, label) {
+  const requests = [];
+  let responseMode = "initial";
+  const catalogServer = createServer((request, response) => {
+    requests.push({
+      path: request.url,
+      authorization: request.headers.authorization,
+    });
+    if (responseMode === "failure") {
+      setTimeout(() => {
+        response.writeHead(502, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            error: "synthetic-private-upstream-error",
+            credential: "fake-model-catalog-secret",
+          }),
+        );
+      }, 500);
+      return;
+    }
+    const modelId =
+      responseMode === "initial" ? "synthetic-model-v1" : "synthetic-model-v2";
+    const send = () => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({ data: [{ id: modelId, owned_by: "synthetic" }] }),
+      );
+    };
+    if (responseMode === "refresh-success") setTimeout(send, 700);
+    else send();
+  });
+  await new Promise((done) => catalogServer.listen(0, "127.0.0.1", done));
+  const endpoint = `http://127.0.0.1:${catalogServer.address().port}/v1`;
+  const params = {
+    baseUrl: endpoint,
+    apiKey: "fake-model-catalog-secret",
+    isFullUrl: false,
+    apiFormat: "openai-responses",
+  };
+  const cachePath = join(
+    process.env.USERPROFILE,
+    ".yunswitch",
+    "model-catalog.json",
+  );
+  const expireCache = async () => {
+    const cache = JSON.parse(await readFile(cachePath, "utf8"));
+    const snapshot = cache.snapshots[providerKey];
+    assert.ok(snapshot, "model catalog snapshot exists before expiry");
+    snapshot.fetchedAtSecs = 0;
+    snapshot.lastAttemptAtSecs = 0;
+    snapshot.vendorError = null;
+    await writeFile(cachePath, `${JSON.stringify(cache, null, 2)}\n`);
+  };
+  const cacheStatus = () =>
+    cdp.invoke("get_model_catalog_cache_status", params);
+
+  try {
+    const initial = await cdp.invoke("get_model_catalog", params);
+    assert.deepEqual(
+      initial.models.map((model) => model.id),
+      ["synthetic-model-v1"],
+    );
+    const providerKey = initial.providerKey;
+    assert.match(providerKey, /^v2-[0-9a-f]{64}$/);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].path, "/v1/models");
+    assert.equal(requests[0].authorization, "Bearer fake-model-catalog-secret");
+    check(`${label} model catalog uses an isolated hashed request identity`);
+
+    responseMode = "refresh-success";
+    await expireCache();
+    const concurrent = await Promise.all(
+      Array.from({ length: 5 }, () => cdp.invoke("get_model_catalog", params)),
+    );
+    assert.ok(concurrent.every((snapshot) => snapshot.refreshing));
+    assert.ok(
+      concurrent.every((snapshot) =>
+        snapshot.models.some((model) => model.id === "synthetic-model-v1"),
+      ),
+    );
+    const refreshed = await until(async () => {
+      const status = await cacheStatus();
+      return !status?.refreshing &&
+        status?.models?.some((model) => model.id === "synthetic-model-v2")
+        ? status
+        : null;
+    }, "background model catalog refresh");
+    assert.equal(
+      requests.length,
+      2,
+      "concurrent stale reads share one upstream fetch",
+    );
+    assert.equal(refreshed.vendorError, null);
+    check(
+      `${label} stale model catalog remains available during one background refresh`,
+      {
+        concurrentReads: concurrent.length,
+        upstreamRequests: requests.length,
+      },
+    );
+
+    responseMode = "failure";
+    await expireCache();
+    const stale = await cdp.invoke("get_model_catalog", params);
+    assert.equal(stale.refreshing, true);
+    const failed = await until(async () => {
+      const status = await cacheStatus();
+      return !status?.refreshing && status?.vendorError ? status : null;
+    }, "failed catalog refresh state");
+    assert.equal(failed.vendorError, "HTTP 502 Bad Gateway");
+    assert.ok(failed.models.some((model) => model.id === "synthetic-model-v2"));
+    await cdp.invoke("get_model_catalog", params);
+    assert.equal(
+      requests.length,
+      3,
+      "failed refresh observes the retry backoff",
+    );
+    const cacheText = await readFile(cachePath, "utf8");
+    for (const privateValue of [
+      "fake-model-catalog-secret",
+      "synthetic-private-upstream-error",
+      "Bearer",
+    ]) {
+      assert.ok(
+        !cacheText.includes(privateValue),
+        `catalog cache excludes ${privateValue}`,
+      );
+      assert.ok(!failed.vendorError.includes(privateValue));
+    }
+    assert.equal(requests.length, 3);
+    check(
+      `${label} failed catalog refresh retains models and excludes credentials and upstream body`,
+    );
+
+    const legacy = {
+      version: 1,
+      snapshots: {
+        [endpoint]: {
+          version: 1,
+          fetchedAtSecs: 1,
+          providerKey: endpoint,
+          models: [
+            {
+              id: "legacy-unsafe-model",
+              displayName: "Legacy",
+              source: "vendor",
+            },
+          ],
+          vendorError: null,
+        },
+      },
+    };
+    await writeFile(cachePath, `${JSON.stringify(legacy, null, 2)}\n`);
+    responseMode = "initial";
+    const migrated = await cdp.invoke("get_model_catalog", params);
+    assert.deepEqual(
+      migrated.models.map((model) => model.id),
+      ["synthetic-model-v1"],
+    );
+    assert.equal(
+      requests.length,
+      4,
+      "legacy cache is discarded and fetched again",
+    );
+    const migratedCache = await readFile(cachePath, "utf8");
+    assert.ok(!migratedCache.includes(endpoint));
+    assert.ok(!migratedCache.includes("fake-model-catalog-secret"));
+    check(`${label} legacy model catalog cache is safely rebuilt`);
+  } finally {
+    await new Promise((done) => catalogServer.close(done));
+  }
+}
+
 async function exerciseMigration(cdp) {
   const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
   const source = await readFile(
@@ -874,6 +1047,7 @@ async function main() {
   );
   check("first-run UI renders and its confirmation persists");
   await exerciseProxy(cdp);
+  await exerciseModelCatalog(cdp, "portable");
   await exerciseCodexCompatibility(cdp, { check, until, label: "portable" });
   await exitApp();
   // A fresh installation may create tool directories. They must remain inside
