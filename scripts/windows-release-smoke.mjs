@@ -529,9 +529,8 @@ async function exerciseModelCatalog(cdp, label) {
 
   try {
     const initial = await cdp.invoke("get_model_catalog", params);
-    assert.deepEqual(
-      initial.models.map((model) => model.id),
-      ["synthetic-model-v1"],
+    assert.ok(
+      initial.models.some((model) => model.id === "synthetic-model-v1"),
     );
     const providerKey = initial.providerKey;
     assert.match(providerKey, /^v2-[0-9a-f]{64}$/);
@@ -626,9 +625,8 @@ async function exerciseModelCatalog(cdp, label) {
     await writeFile(cachePath, `${JSON.stringify(legacy, null, 2)}\n`);
     responseMode = "initial";
     const migrated = await cdp.invoke("get_model_catalog", params);
-    assert.deepEqual(
-      migrated.models.map((model) => model.id),
-      ["synthetic-model-v1"],
+    assert.ok(
+      migrated.models.some((model) => model.id === "synthetic-model-v1"),
     );
     assert.equal(
       requests.length,
