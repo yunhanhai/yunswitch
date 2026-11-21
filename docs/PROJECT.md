@@ -40,6 +40,8 @@
 
 当前源码版本为 `3.20.1-yunswitch.8`，package.json、Cargo.toml、Cargo.lock 与 Tauri 配置保持一致。Windows x64 安装版与便携 ZIP 已在 [GitHub](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.8) 和 [Gitee](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.8) 公开；安装、`.7` 升级、并发恢复及共享期限检查通过验收。之前的[`.7` 版本](releases/3.20.1-yunswitch.7.md)保留原附件和验收记录。
 
+`.8` 发布后的诊断源码已通过 [CI 与 Windows build-only 安装验收](REQUEST-DIAGNOSTICS-ACCEPTANCE.md)，可在桌面路由设置中查看请求状态。公开 `.8` 附件和版本标识未变；新诊断源码尚未作为新版本发布。
+
 已公开的 `3.20.1-yunswitch.2` Windows x64 安装版与免安装版见 [GitHub](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.2) 和 [Gitee](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.2)，其安装与首版升级验收通过。文件校验与运行记录见[`.2` 发布记录](releases/3.20.1-yunswitch.2.md)。
 
 首个独立预发布 `3.20.1-yunswitch.1` 的 Windows x64 安装版与免安装版已在 Gitee、GitHub 同步公开，其他平台尚未发布。上游基线仍为 v3.20.1。已公开包的校验与验收记录见[首版记录](releases/3.20.1-yunswitch.1.md)。
