@@ -3,6 +3,7 @@
 //! 提供前端调用的 API 接口
 
 use crate::error::AppError;
+use crate::proxy::diagnostics::{provider_ref, Detail, Snapshot};
 use crate::proxy::types::*;
 use crate::proxy::{CircuitBreakerConfig, CircuitBreakerStats};
 use crate::store::AppState;
@@ -75,6 +76,54 @@ pub async fn set_proxy_takeover_for_app(
 #[tauri::command]
 pub async fn get_proxy_status(state: tauri::State<'_, AppState>) -> Result<ProxyStatus, String> {
     state.proxy_service.get_status().await
+}
+
+#[tauri::command]
+pub(crate) async fn get_proxy_rate_limit_waits(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<RateLimitWaiting>, String> {
+    Ok(state.proxy_service.rate_limit_waits_for_ui().await)
+}
+
+/// Request lifecycles are available only to the local desktop UI.
+#[tauri::command]
+pub(crate) async fn get_request_diagnostics(
+    state: tauri::State<'_, AppState>,
+) -> Result<Snapshot, String> {
+    Ok(state.proxy_service.request_diagnostics().await)
+}
+
+#[tauri::command]
+pub(crate) async fn get_request_diagnostic_detail(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<Option<Detail>, String> {
+    Ok(state.proxy_service.request_diagnostic_detail(&id).await)
+}
+
+/// Resolve display names on demand. These are not part of the diagnostic
+/// record or its export and this query does not read provider settings.
+#[tauri::command]
+pub(crate) async fn get_request_diagnostic_provider_labels(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<std::collections::BTreeMap<String, String>, String> {
+    let Some(request) = state.proxy_service.request_diagnostic_detail(&id).await else {
+        return Ok(Default::default());
+    };
+    let app = request.app_type();
+    Ok(state
+        .db
+        .list_provider_labels(app)
+        .map_err(|_| "Could not load provider labels".to_owned())?
+        .into_iter()
+        .filter_map(|(id, name)| {
+            let reference = provider_ref(app, &id);
+            request
+                .contains_provider(&reference)
+                .then_some((reference, name))
+        })
+        .collect())
 }
 
 /// 获取代理配置

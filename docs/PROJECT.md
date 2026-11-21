@@ -40,6 +40,8 @@
 
 当前源码版本为 `3.20.1-yunswitch.8`，package.json、Cargo.toml、Cargo.lock 与 Tauri 配置保持一致。Windows x64 安装版与便携 ZIP 已在 [GitHub](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.8) 和 [Gitee](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.8) 公开；安装、`.7` 升级、并发恢复及共享期限检查通过验收。之前的[`.7` 版本](releases/3.20.1-yunswitch.7.md)保留原附件和验收记录。
 
+`.8` 发布后的诊断源码已通过 [CI 与 Windows build-only 安装验收](REQUEST-DIAGNOSTICS-ACCEPTANCE.md)，可在桌面路由设置中查看请求状态。公开 `.8` 附件和版本标识未变；新诊断源码尚未作为新版本发布。
+
 已公开的 `3.20.1-yunswitch.2` Windows x64 安装版与免安装版见 [GitHub](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.2) 和 [Gitee](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.2)，其安装与首版升级验收通过。文件校验与运行记录见[`.2` 发布记录](releases/3.20.1-yunswitch.2.md)。
 
 首个独立预发布 `3.20.1-yunswitch.1` 的 Windows x64 安装版与免安装版已在 Gitee、GitHub 同步公开，其他平台尚未发布。上游基线仍为 v3.20.1。已公开包的校验与验收记录见[首版记录](releases/3.20.1-yunswitch.1.md)。
@@ -60,7 +62,7 @@ Windows MSI 沿用固定独立 UpgradeCode，当前安装版本为 `3.20.1.8`；
 
 ## 供应商目录维护与验证范围
 
-限流重试的默认值、流输出后无法透明重放的边界，以及本次源码新增的 Codex Responses 兼容开关，见 [Codex 兼容与重试说明](CODEX-RESPONSES-COMPATIBILITY.md)。该开关尚未包含在已公开 `.3` 包中。
+限流重试默认值、流输出后的处理边界和 Codex Responses 兼容开关见 [Codex 兼容与重试说明](CODEX-RESPONSES-COMPATIBILITY.md)。`.8` 发布后的开发源码新增[本地请求诊断](REQUEST-DIAGNOSTICS.md)，可按应用查看活跃请求、近期结果和脱敏时间线。
 
 已合并的目录维护清理内置供应商的网站与 API Key 获取链接中继承的推广归因参数和邀请路径，移除内置商业合作标记；默认选择器排序为官方预设优先，其余按显示名称排序。预设名称、请求地址、配置模板与已有用户配置保留，部分历史字段继续用于供应商识别与兼容，不代表 YunSwitch 与供应商存在商业合作。
 
@@ -96,7 +98,7 @@ upstream  https://github.com/farion1231/cc-switch.git
 
 ## 后续调整
 
-具体优先级、完成证据和阶段边界见[开发路线](DEVELOPMENT-ROADMAP.md)。本轮先补限流后的并发恢复与共享等待期限，再推进请求诊断、接入验证和协议扩展。
+具体优先级和完成证据见[开发路线](DEVELOPMENT-ROADMAP.md)。在限流恢复与请求诊断之后，接下来按客户端、供应商、协议和模型建立接入与长会话验证矩阵。
 
 - Windows x64 首个独立预览版已发布；后续包按版本重新验收，其他平台按实际构建与安装结果逐步加入，签名和自动更新按自有渠道逐步启用。
 - 持续整理历史手册与供应商目录，在保留兼容性和来源说明的基础上维护中性链接及排序。

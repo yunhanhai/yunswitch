@@ -9,6 +9,7 @@
 
 use super::{
     content_encoding::{decompress_body, get_content_encoding, is_supported_content_encoding},
+    diagnostics::{self, DiagnosticError},
     error_mapper::{get_error_message, map_proxy_error_to_status},
     forwarder::ActiveConnectionGuard,
     handler_config::{
@@ -127,21 +128,32 @@ pub async fn handle_messages(
     State(state): State<ProxyState>,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
-    handle_messages_for_app(state, request, AppType::Claude, "Claude", "claude", None).await
+    diagnostics::track(state.diagnostics.clone(), "claude", request, |request| {
+        handle_messages_for_app(state, request, AppType::Claude, "Claude", "claude", None)
+    })
+    .await
 }
 
 pub async fn handle_claude_desktop_messages(
     State(state): State<ProxyState>,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
-    validate_claude_desktop_gateway_auth(&state, request.headers())?;
-    handle_messages_for_app(
-        state,
-        request,
-        AppType::ClaudeDesktop,
-        "Claude Desktop",
+    diagnostics::track(
+        state.diagnostics.clone(),
         "claude-desktop",
-        Some("/claude-desktop"),
+        request,
+        |request| async move {
+            validate_claude_desktop_gateway_auth(&state, request.headers())?;
+            handle_messages_for_app(
+                state,
+                request,
+                AppType::ClaudeDesktop,
+                "Claude Desktop",
+                "claude-desktop",
+                Some("/claude-desktop"),
+            )
+            .await
+        },
     )
     .await
 }
@@ -762,6 +774,16 @@ pub async fn handle_chat_completions(
     State(state): State<ProxyState>,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
+    diagnostics::track(state.diagnostics.clone(), "codex", request, |request| {
+        handle_chat_completions_request(state, request)
+    })
+    .await
+}
+
+async fn handle_chat_completions_request(
+    state: ProxyState,
+    request: axum::extract::Request,
+) -> Result<axum::response::Response, ProxyError> {
     let (parts, req_body) = request.into_parts();
     let method = parts.method.clone();
     let uri = parts.uri;
@@ -828,20 +850,25 @@ pub async fn handle_responses(
     State(state): State<ProxyState>,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
-    handle_responses_for_app(state, request, AppType::Codex, "Codex", "codex").await
+    diagnostics::track(state.diagnostics.clone(), "codex", request, |request| {
+        handle_responses_for_app(state, request, AppType::Codex, "Codex", "codex")
+    })
+    .await
 }
 
 pub async fn handle_grokbuild_responses(
     State(state): State<ProxyState>,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
-    handle_responses_for_app(
-        state,
-        request,
-        AppType::GrokBuild,
-        "Grok Build",
-        "grokbuild",
-    )
+    diagnostics::track(state.diagnostics.clone(), "grokbuild", request, |request| {
+        handle_responses_for_app(
+            state,
+            request,
+            AppType::GrokBuild,
+            "Grok Build",
+            "grokbuild",
+        )
+    })
     .await
 }
 
@@ -965,7 +992,10 @@ pub async fn handle_responses_compact(
     State(state): State<ProxyState>,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
-    handle_responses_compact_for_app(state, request, AppType::Codex, "Codex", "codex").await
+    diagnostics::track(state.diagnostics.clone(), "codex", request, |request| {
+        handle_responses_compact_for_app(state, request, AppType::Codex, "Codex", "codex")
+    })
+    .await
 }
 
 /// Handle Codex's standalone Alpha Search protocol as a semantic passthrough.
@@ -976,6 +1006,16 @@ pub async fn handle_responses_compact(
 /// Search protocol.
 pub async fn handle_alpha_search(
     State(state): State<ProxyState>,
+    request: axum::extract::Request,
+) -> Result<axum::response::Response, ProxyError> {
+    diagnostics::track(state.diagnostics.clone(), "codex", request, |request| {
+        handle_alpha_search_request(state, request)
+    })
+    .await
+}
+
+async fn handle_alpha_search_request(
+    state: ProxyState,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
     let (parts, req_body) = request.into_parts();
@@ -1037,13 +1077,15 @@ pub async fn handle_grokbuild_responses_compact(
     State(state): State<ProxyState>,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
-    handle_responses_compact_for_app(
-        state,
-        request,
-        AppType::GrokBuild,
-        "Grok Build",
-        "grokbuild",
-    )
+    diagnostics::track(state.diagnostics.clone(), "grokbuild", request, |request| {
+        handle_responses_compact_for_app(
+            state,
+            request,
+            AppType::GrokBuild,
+            "Grok Build",
+            "grokbuild",
+        )
+    })
     .await
 }
 
@@ -1896,10 +1938,13 @@ fn build_codex_error_response(
     {
         builder = builder.header(axum::http::header::RETRY_AFTER, seconds.to_string());
     }
-    builder.body(axum::body::Body::from(body)).map_err(|e| {
-        log::error!("[Codex] 构建代理错误响应失败: {e}");
-        ProxyError::Internal(format!("Failed to build proxy error response: {e}"))
-    })
+    builder
+        .extension(DiagnosticError::from(error))
+        .body(axum::body::Body::from(body))
+        .map_err(|e| {
+            log::error!("[Codex] 构建代理错误响应失败: {e}");
+            ProxyError::Internal(format!("Failed to build proxy error response: {e}"))
+        })
 }
 
 fn codex_proxy_error_json(
@@ -2077,6 +2122,17 @@ fn compact_error_message(message: &str, max_chars: usize) -> String {
 /// 处理 Gemini API 请求（透传，包括查询参数）
 pub async fn handle_gemini(
     State(state): State<ProxyState>,
+    uri: axum::http::Uri,
+    request: axum::extract::Request,
+) -> Result<axum::response::Response, ProxyError> {
+    diagnostics::track(state.diagnostics.clone(), "gemini", request, |request| {
+        handle_gemini_request(state, uri, request)
+    })
+    .await
+}
+
+async fn handle_gemini_request(
+    state: ProxyState,
     uri: axum::http::Uri,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
@@ -2779,7 +2835,7 @@ fn log_forward_error(
 
     let logger = UsageLogger::new(&state.db);
     let status_code = map_proxy_error_to_status(error);
-    let error_message = get_error_message(error);
+    let error_message = DiagnosticError::from(error).to_string();
     let request_id = uuid::Uuid::new_v4().to_string();
 
     if let Err(e) = logger.log_error_with_context(
