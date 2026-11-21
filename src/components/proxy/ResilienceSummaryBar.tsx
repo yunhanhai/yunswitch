@@ -17,7 +17,7 @@ import {
   HelpCircle,
 } from "lucide-react";
 import { useResilienceSummary } from "@/lib/query/failover";
-import { useProxyStatusQuery } from "@/lib/query/proxy";
+import { useProxyRateLimitWaits, useProxyStatusQuery } from "@/lib/query/proxy";
 import { useRoutingGroups } from "@/lib/query/routing-groups";
 
 interface ResilienceSummaryBarProps {
@@ -33,6 +33,9 @@ export function ResilienceSummaryBar({
   const { t } = useTranslation();
   const { data: summary } = useResilienceSummary(appType);
   const { data: proxyStatus } = useProxyStatusQuery();
+  const { data: requestWaits = [] } = useProxyRateLimitWaits(
+    proxyStatus?.running ?? false,
+  );
   const shouldFetchGroups = effectiveRouteSize == null;
   const { data: routingGroups = [] } = useRoutingGroups(
     appType,
@@ -43,11 +46,9 @@ export function ResilienceSummaryBar({
     routingGroups
       .filter((entry) => entry.group.enabled)
       .flatMap((entry) => entry.members).length;
-  // 仅当等待态与当前 appType 一致时展示，避免 claude 的等待误显示到 codex 卡片。
-  const waiting =
-    proxyStatus?.rate_limit_waiting?.appType === appType
-      ? proxyStatus.rate_limit_waiting
-      : null;
+  const waitingCount = requestWaits.filter(
+    (row) => row.appType === appType,
+  ).length;
 
   if (!summary) return null;
   const coolingHint =
@@ -95,20 +96,12 @@ export function ResilienceSummaryBar({
       label: t("proxy.resilience.rateLimitWaiting", {
         defaultValue: "等待中",
       }),
-      value: waiting
-        ? `${waiting.providerName} · ${waiting.waitSecs}s (#${waiting.attempt})`
-        : t("proxy.resilience.noData", { defaultValue: "—" }),
-      tone: waiting
+      value: String(waitingCount),
+      tone: waitingCount
         ? "text-teal-600 dark:text-teal-400 animate-pulse"
         : "text-muted-foreground",
-      hint: waiting
-        ? t("proxy.resilience.rateLimitWaitingHint", {
-            defaultValue:
-              "当前有一个请求正因 429 限流等待重试，期间不会显示陈旧的失败信息",
-            providerName: waiting.providerName,
-            waitSecs: waiting.waitSecs,
-            attempt: waiting.attempt,
-          })
+      hint: waitingCount
+        ? t("proxy.requestDiagnostics.waitingHint")
         : t("proxy.resilience.rateLimitWaitingIdleHint", {
             defaultValue: "当前没有请求处在 429 等待重试循环中",
           }),
@@ -127,8 +120,7 @@ export function ResilienceSummaryBar({
           ? "text-teal-600 dark:text-teal-400"
           : "text-foreground",
       hint: t("proxy.resilience.rateLimitWaitsHint", {
-        defaultValue:
-          "本次代理运行期间，遇到 429 后等待 Retry-After 再重试的次数与累计等待时长",
+        defaultValue: "本次代理运行期间安排的 429 恢复次数与计划等待总时长",
       }),
     },
     {
@@ -192,9 +184,7 @@ export function ResilienceSummaryBar({
           title={item.hint}
         >
           <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            <item.icon
-              className={`h-3 w-3 ${item.label === t("proxy.resilience.rateLimitWaiting", { defaultValue: "等待中" }) && waiting ? "animate-spin" : ""}`}
-            />
+            <item.icon className="h-3 w-3" />
             {item.label}
             {item.hint ? (
               <span className="inline-flex" aria-hidden>

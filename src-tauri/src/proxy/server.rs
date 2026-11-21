@@ -9,6 +9,7 @@
 //! a direct (non-proxied) CLI request.
 
 use super::{
+    diagnostics::Diagnostics,
     failover_switch::FailoverSwitchManager,
     handlers,
     log_codes::srv as log_srv,
@@ -29,10 +30,14 @@ use std::sync::Arc;
 use tokio::sync::{oneshot, RwLock};
 use tokio::task::{JoinHandle, JoinSet};
 
+#[cfg(test)]
+mod diagnostics_tests;
+
 /// 代理服务器状态（共享）
 #[derive(Clone)]
 pub struct ProxyState {
     pub db: Arc<Database>,
+    pub(crate) diagnostics: Arc<Diagnostics>,
     pub config: Arc<RwLock<ProxyConfig>>,
     pub status: Arc<RwLock<ProxyStatus>>,
     pub start_time: Arc<RwLock<Option<std::time::Instant>>>,
@@ -72,6 +77,7 @@ impl ProxyServer {
 
         let state = ProxyState {
             db,
+            diagnostics: Arc::new(Diagnostics::default()),
             config: Arc::new(RwLock::new(config.clone())),
             status: Arc::new(RwLock::new(ProxyStatus::default())),
             start_time: Arc::new(RwLock::new(None)),
@@ -116,6 +122,7 @@ impl ProxyServer {
             .local_addr()
             .map_err(|e| ProxyError::BindFailed(e.to_string()))?;
         let actual_port = local_addr.port();
+        self.state.diagnostics.start();
 
         log::info!("[{}] 代理服务器启动于 {local_addr}", log_srv::STARTED);
 
@@ -219,6 +226,7 @@ impl ProxyServer {
             // Include clients blocked in the initial peek as well as active
             // HTTP connections; stop() waits until their sockets are released.
             drop(listener);
+            state.diagnostics.stop();
             connections.shutdown().await;
 
             // 服务器停止后更新状态
@@ -239,6 +247,7 @@ impl ProxyServer {
     pub async fn stop(&self) -> Result<(), ProxyError> {
         // 1. 发送关闭信号
         if let Some(tx) = self.shutdown_tx.write().await.take() {
+            self.state.diagnostics.stop();
             let _ = tx.send(());
         } else {
             return Err(ProxyError::NotRunning);
@@ -274,6 +283,10 @@ impl ProxyServer {
         }
     }
 
+    pub(crate) fn diagnostics(&self) -> Arc<Diagnostics> {
+        self.state.diagnostics.clone()
+    }
+
     pub async fn get_status(&self) -> ProxyStatus {
         let mut status = self.state.status.read().await.clone();
 
@@ -294,6 +307,17 @@ impl ProxyServer {
             .collect();
 
         status
+    }
+
+    pub(crate) async fn rate_limit_waits_for_ui(&self) -> Vec<RateLimitWaiting> {
+        self.state
+            .status
+            .read()
+            .await
+            .active_rate_limit_waits
+            .values()
+            .cloned()
+            .collect()
     }
 
     /// 更新某个应用类型当前“目标供应商”（用于 UI 展示 active_targets）
@@ -939,6 +963,9 @@ mod tests {
         })
         .await
         .expect("request enters retry wait");
+        let diagnostics = proxy.diagnostics();
+        let running = serde_json::to_value(diagnostics.snapshot()).unwrap();
+        let id = running["active"][0]["id"].as_str().unwrap().to_owned();
         drop(stream);
         let cleared = timeout(Duration::from_millis(800), async {
             loop {
@@ -950,6 +977,9 @@ mod tests {
             }
         })
         .await;
+        let trace = serde_json::to_value(diagnostics.detail(&id)).unwrap();
+        assert_eq!(trace["current"]["phase"], "cancelled");
+        assert_eq!(trace["current"]["reason"], "clientDisconnected");
         let cooldown_after_cancel = proxy
             .state
             .provider_router

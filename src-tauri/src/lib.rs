@@ -1563,6 +1563,10 @@ pub fn run() {
             commands::get_proxy_takeover_status,
             commands::set_proxy_takeover_for_app,
             commands::get_proxy_status,
+            commands::get_proxy_rate_limit_waits,
+            commands::get_request_diagnostics,
+            commands::get_request_diagnostic_detail,
+            commands::get_request_diagnostic_provider_labels,
             commands::get_proxy_config,
             commands::update_proxy_config,
             // Global & Per-App Config

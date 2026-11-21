@@ -9,6 +9,7 @@ pub(crate) mod codex_response_guard;
 pub(crate) mod codex_responses_compat;
 pub(crate) mod content_encoding;
 pub mod copilot_optimizer;
+pub(crate) mod diagnostics;
 pub mod error;
 pub mod error_mapper;
 pub(crate) mod failover_switch;

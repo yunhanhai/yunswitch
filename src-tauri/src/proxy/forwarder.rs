@@ -6,6 +6,7 @@ use super::hyper_client::{ProxyResponse, MAX_RESPONSE_BODY_BYTES};
 use super::{
     body_filter::filter_private_params_with_whitelist,
     content_encoding::{decompress_body_with_limit, get_content_encoding},
+    diagnostics::{DiagnosticError, ErrorClass, Phase, Reason, RequestTrace},
     error::*,
     failover_switch::FailoverSwitchManager,
     json_canonical::{canonicalize_value, short_value_hash},
@@ -33,7 +34,9 @@ use bytes::Bytes;
 use futures::StreamExt;
 use http::Extensions;
 use serde_json::Value;
+use std::future::{poll_fn, Future};
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::Manager;
 use tokio::sync::RwLock;
 
@@ -535,7 +538,12 @@ impl RequestForwarder {
         }
         let result = if matches!(error, ProxyError::BillingExhausted(_)) {
             self.router
-                .record_fatal_result(&provider.id, app_type, Some(permit), error.to_string())
+                .record_fatal_result(
+                    &provider.id,
+                    app_type,
+                    Some(permit),
+                    summarize_proxy_error(error),
+                )
                 .await
         } else {
             self.router
@@ -544,7 +552,7 @@ impl RequestForwarder {
                     app_type,
                     Some(permit),
                     false,
-                    Some(error.to_string()),
+                    Some(summarize_proxy_error(error)),
                 )
                 .await
         };
@@ -562,6 +570,8 @@ impl RequestForwarder {
         app_type: &str,
         wait_secs: u64,
         attempt: u32,
+        reason: Reason,
+        trace: Option<&RequestTrace>,
     ) -> Result<tokio::sync::OwnedMutexGuard<()>, u64> {
         let started = std::time::Instant::now();
         let Some(minimum) = started.checked_add(std::time::Duration::from_secs(wait_secs)) else {
@@ -584,10 +594,32 @@ impl RequestForwarder {
             },
         )
         .await;
+        let permit = self
+            .router
+            .acquire_rate_limit_recovery(&provider.id, app_type);
+        tokio::pin!(permit);
+        let mut queued = false;
         let acquired = tokio::time::timeout_at(
             tokio::time::Instant::from_std(budget),
-            self.router
-                .acquire_rate_limit_recovery(&provider.id, app_type),
+            poll_fn(|cx| {
+                let result = permit.as_mut().poll(cx);
+                if result.is_pending() && !queued {
+                    queued = true;
+                    if let Some(trace) = trace {
+                        trace.step(
+                            Phase::RecoveryQueued,
+                            Reason::RecoveryPermit,
+                            None,
+                            Some(
+                                budget
+                                    .saturating_duration_since(std::time::Instant::now())
+                                    .as_millis() as u64,
+                            ),
+                        );
+                    }
+                }
+                result
+            }),
         )
         .await;
         let permit = match acquired {
@@ -601,6 +633,7 @@ impl RequestForwarder {
                     .max(1));
             }
         };
+        let mut last_target = None;
         loop {
             let target = self
                 .router
@@ -618,6 +651,22 @@ impl RequestForwarder {
             let now = std::time::Instant::now();
             if now >= target {
                 break;
+            }
+            if last_target != Some(target) {
+                if let Some(trace) = trace {
+                    let reason = if target > minimum {
+                        Reason::SharedCooldown
+                    } else {
+                        reason
+                    };
+                    trace.step(
+                        Phase::CoolingDown,
+                        reason,
+                        Some(target.saturating_duration_since(now).as_millis() as u64),
+                        None,
+                    );
+                }
+                last_target = Some(target);
             }
             let planned = target.saturating_duration_since(started);
             waiting
@@ -668,14 +717,15 @@ impl RequestForwarder {
                     app_type_str,
                     Some(permit),
                     false,
-                    Some(retry_err.to_string()),
+                    Some(summarize_proxy_error(&retry_err)),
                 )
                 .await;
             {
                 let mut status = self.status.write().await;
                 status.last_error = Some(format!(
                     "Provider {} {rectifier_label}重试失败: {}",
-                    provider.name, retry_err
+                    provider.name,
+                    summarize_proxy_error(&retry_err)
                 ));
             }
             *last_error = Some(retry_err);
@@ -686,7 +736,7 @@ impl RequestForwarder {
         permit.release();
         let mut status = self.status.write().await;
         status.failed_requests += 1;
-        status.last_error = Some(retry_err.to_string());
+        status.last_error = Some(summarize_proxy_error(&retry_err));
         if status.total_requests > 0 {
             status.success_rate =
                 (status.success_requests as f32 / status.total_requests as f32) * 100.0;
@@ -763,6 +813,7 @@ impl RequestForwarder {
             provider: None,
         })?;
         let app_type_str = app_type.as_str();
+        let trace = extensions.get::<RequestTrace>();
 
         if providers.is_empty() {
             return Err(ForwardError {
@@ -806,6 +857,9 @@ impl RequestForwarder {
                     .is_fatally_open(&provider.id, app_type_str)
                     .await
                 {
+                    if let Some(trace) = trace {
+                        trace.provider(&provider.id, false);
+                    }
                     log::warn!(
                         "[{app_type_str}] Provider {} 额度耗尽（致命熔断中），快速失败",
                         provider.name
@@ -852,6 +906,9 @@ impl RequestForwarder {
                 };
 
             attempted_providers += 1;
+            if let Some(trace) = trace {
+                trace.provider(&provider.id, attempted_providers > 1);
+            }
 
             // 更新状态中的当前 Provider 信息（per-attempt 维度的标识）
             //
@@ -924,15 +981,36 @@ impl RequestForwarder {
                                         app_type_str,
                                         wait_secs,
                                         rate_limit_attempt,
+                                        if retry_after_secs.is_some_and(|seconds| seconds > 0) {
+                                            Reason::RetryAfter
+                                        } else {
+                                            Reason::RateLimitBackoff
+                                        },
+                                        trace,
                                     )
                                     .await
                                 {
-                                    Ok(permit) => recovery_permit = Some(permit),
+                                    Ok(permit) => {
+                                        recovery_permit = Some(permit);
+                                        if let Some(trace) = trace {
+                                            trace.step(
+                                                Phase::Retrying,
+                                                Reason::RateLimitRecovery,
+                                                None,
+                                                None,
+                                            );
+                                        }
+                                    }
                                     Err(seconds) => {
+                                        if let Some(trace) = trace {
+                                            trace.note_error(DiagnosticError::new(
+                                                ErrorClass::RecoveryWaitLimit,
+                                            ));
+                                        }
                                         break Err(ProxyError::RateLimited {
                                             retry_after_secs: Some(seconds),
                                             body,
-                                        })
+                                        });
                                     }
                                 }
                                 continue;
@@ -956,6 +1034,14 @@ impl RequestForwarder {
                             break Err(e);
                         };
                         same_provider_attempt = next_attempt;
+                        if let Some(trace) = trace {
+                            trace.step(
+                                Phase::Retrying,
+                                Reason::TransientBackoff,
+                                Some(wait_ms),
+                                None,
+                            );
+                        }
                         log::warn!(
                             "[{app_type_str}] [{}] Provider {} 请求失败，{wait_ms}ms 后重试同一供应商（第 {same_provider_attempt}/{} 次）: {}",
                             log_fwd::PROVIDER_SAME_RETRY,
@@ -963,7 +1049,7 @@ impl RequestForwarder {
                             self.same_provider_retries,
                             summarize_proxy_error(&e)
                         );
-                        tokio::time::sleep(std::time::Duration::from_millis(wait_ms)).await;
+                        tokio::time::sleep(Duration::from_millis(wait_ms)).await;
                         continue;
                     }
                 }
@@ -1036,7 +1122,7 @@ impl RequestForwarder {
                             .await;
                         let mut status = self.status.write().await;
                         status.failed_requests += 1;
-                        status.last_error = Some(e.to_string());
+                        status.last_error = Some(summarize_proxy_error(&e));
                         if status.total_requests > 0 {
                             status.success_rate = (status.success_requests as f32
                                 / status.total_requests as f32)
@@ -1080,6 +1166,9 @@ impl RequestForwarder {
                                 super::media_sanitizer::UNSUPPORTED_IMAGE_MARKER
                             );
 
+                            if let Some(trace) = trace {
+                                trace.step(Phase::Retrying, Reason::RequestCorrection, None, None);
+                            }
                             match self
                                 .forward(
                                     app_type,
@@ -1158,7 +1247,8 @@ impl RequestForwarder {
                                 }
                                 Err(retry_err) => {
                                     log::warn!(
-                                        "[{app_type_str}] [Media] Unsupported-image retry still failed: {retry_err}"
+                                        "[{app_type_str}] [Media] Unsupported-image retry still failed: {}",
+                                        summarize_proxy_error(&retry_err)
                                     );
                                     if let Some(err) = self
                                         .handle_rectifier_retry_failure(
@@ -1193,7 +1283,7 @@ impl RequestForwarder {
                                 permit.release();
                                 let mut status = self.status.write().await;
                                 status.failed_requests += 1;
-                                status.last_error = Some(e.to_string());
+                                status.last_error = Some(summarize_proxy_error(&e));
                                 if status.total_requests > 0 {
                                     status.success_rate = (status.success_requests as f32
                                         / status.total_requests as f32)
@@ -1227,6 +1317,14 @@ impl RequestForwarder {
                                 let _ = std::mem::replace(&mut rectifier_retried, true);
 
                                 // 使用同一供应商重试（不计入熔断器）
+                                if let Some(trace) = trace {
+                                    trace.step(
+                                        Phase::Retrying,
+                                        Reason::RequestCorrection,
+                                        None,
+                                        None,
+                                    );
+                                }
                                 match self
                                     .forward(
                                         app_type,
@@ -1308,7 +1406,8 @@ impl RequestForwarder {
                                     }
                                     Err(retry_err) => {
                                         log::warn!(
-                                            "[{app_type_str}] [RECT-003] 整流重试仍失败: {retry_err}"
+                                            "[{app_type_str}] [RECT-003] 整流重试仍失败: {}",
+                                            summarize_proxy_error(&retry_err)
                                         );
                                         if let Some(err) = self
                                             .handle_rectifier_retry_failure(
@@ -1346,7 +1445,7 @@ impl RequestForwarder {
                                 permit.release();
                                 let mut status = self.status.write().await;
                                 status.failed_requests += 1;
-                                status.last_error = Some(e.to_string());
+                                status.last_error = Some(summarize_proxy_error(&e));
                                 if status.total_requests > 0 {
                                     status.success_rate = (status.success_requests as f32
                                         / status.total_requests as f32)
@@ -1366,7 +1465,7 @@ impl RequestForwarder {
                                 permit.release();
                                 let mut status = self.status.write().await;
                                 status.failed_requests += 1;
-                                status.last_error = Some(e.to_string());
+                                status.last_error = Some(summarize_proxy_error(&e));
                                 if status.total_requests > 0 {
                                     status.success_rate = (status.success_requests as f32
                                         / status.total_requests as f32)
@@ -1388,6 +1487,9 @@ impl RequestForwarder {
                             let _ = std::mem::replace(&mut budget_rectifier_retried, true);
 
                             // 使用同一供应商重试（不计入熔断器）
+                            if let Some(trace) = trace {
+                                trace.step(Phase::Retrying, Reason::RequestCorrection, None, None);
+                            }
                             match self
                                 .forward(
                                     app_type,
@@ -1463,7 +1565,8 @@ impl RequestForwarder {
                                 }
                                 Err(retry_err) => {
                                     log::warn!(
-                                        "[{app_type_str}] [RECT-012] budget 整流重试仍失败: {retry_err}"
+                                        "[{app_type_str}] [RECT-012] budget 整流重试仍失败: {}",
+                                        summarize_proxy_error(&retry_err)
                                     );
                                     if let Some(err) = self
                                         .handle_rectifier_retry_failure(
@@ -1489,7 +1592,7 @@ impl RequestForwarder {
                         permit.release();
                         let mut status = self.status.write().await;
                         status.failed_requests += 1;
-                        status.last_error = Some(e.to_string());
+                        status.last_error = Some(summarize_proxy_error(&e));
                         if status.total_requests > 0 {
                             status.success_rate = (status.success_requests as f32
                                 / status.total_requests as f32)
@@ -1513,8 +1616,11 @@ impl RequestForwarder {
 
                             {
                                 let mut status = self.status.write().await;
-                                status.last_error =
-                                    Some(format!("Provider {} 失败: {}", provider.name, e));
+                                status.last_error = Some(format!(
+                                    "Provider {} 失败: {}",
+                                    provider.name,
+                                    summarize_proxy_error(&e)
+                                ));
                             }
 
                             let (log_code, log_message) = build_retryable_failure_log(
@@ -1536,7 +1642,7 @@ impl RequestForwarder {
                             {
                                 let mut status = self.status.write().await;
                                 status.failed_requests += 1;
-                                status.last_error = Some(e.to_string());
+                                status.last_error = Some(summarize_proxy_error(&e));
                                 if status.total_requests > 0 {
                                     status.success_rate = (status.success_requests as f32
                                         / status.total_requests as f32)
@@ -1599,6 +1705,29 @@ impl RequestForwarder {
     /// `outbound_model` 是最终发往上游的模型名（所有映射/改写之后）。
     #[allow(clippy::too_many_arguments)]
     async fn forward(
+        &self,
+        app_type: &AppType,
+        method: &http::Method,
+        provider: &Provider,
+        endpoint: &str,
+        body: &Value,
+        headers: &axum::http::HeaderMap,
+        extensions: &Extensions,
+        adapter: &dyn ProviderAdapter,
+    ) -> Result<(ProxyResponse, Option<String>, Option<String>), ProxyError> {
+        let result = self
+            .forward_once(
+                app_type, method, provider, endpoint, body, headers, extensions, adapter,
+            )
+            .await;
+        if let (Err(error), Some(trace)) = (&result, extensions.get::<RequestTrace>()) {
+            trace.note_error(error.into());
+        }
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn forward_once(
         &self,
         app_type: &AppType,
         method: &http::Method,
@@ -2872,6 +3001,7 @@ impl RequestForwarder {
         // Capture immediately before each wire attempt, including rectifier
         // retries. A newer overlapping 429 must survive this attempt's success.
         let cooldown_epoch = self.router.cooldown_epoch();
+        let trace = extensions.get::<RequestTrace>();
 
         // 发送请求
         let response = if is_socks_proxy || !preserve_exact_header_case {
@@ -2891,6 +3021,9 @@ impl RequestForwarder {
             }
             for (key, value) in &ordered_headers {
                 request = request.header(key, value);
+            }
+            if let Some(trace) = trace {
+                trace.send(outbound_model.as_deref());
             }
             let send = request.body(body_bytes).send();
             let send_result = if request_is_streaming {
@@ -2918,6 +3051,9 @@ impl RequestForwarder {
             let uri: http::Uri = url.parse().map_err(|e| {
                 ProxyError::ForwardFailed(format!("Invalid upstream URL ({target_for_log}): {e}"))
             })?;
+            if let Some(trace) = trace {
+                trace.send(outbound_model.as_deref());
+            }
             super::hyper_client::send_request(
                 uri,
                 &target_for_log,
@@ -3500,7 +3636,7 @@ impl RequestForwarder {
 fn extract_error_message(error: &ProxyError) -> Option<String> {
     match error {
         ProxyError::UpstreamError { body, .. } => body.clone(),
-        _ => Some(error.to_string()),
+        _ => Some(summarize_proxy_error(error)),
     }
 }
 
@@ -3629,63 +3765,7 @@ fn build_terminal_failure_log(
 }
 
 fn summarize_proxy_error(error: &ProxyError) -> String {
-    match error {
-        ProxyError::UpstreamError { status, body } => {
-            let body_summary = body
-                .as_deref()
-                .map(summarize_upstream_body)
-                .filter(|summary| !summary.is_empty());
-
-            match body_summary {
-                Some(summary) => format!("上游 HTTP {status}: {summary}"),
-                None => format!("上游 HTTP {status}"),
-            }
-        }
-        ProxyError::Timeout(message) => {
-            format!("请求超时: {}", summarize_text_for_log(message, 180))
-        }
-        ProxyError::ForwardFailed(message) => {
-            format!("请求转发失败: {}", summarize_text_for_log(message, 180))
-        }
-        ProxyError::TransformError(message) => {
-            format!("响应转换失败: {}", summarize_text_for_log(message, 180))
-        }
-        ProxyError::ConfigError(message) => {
-            format!("配置错误: {}", summarize_text_for_log(message, 180))
-        }
-        ProxyError::AuthError(message) => {
-            format!("认证失败: {}", summarize_text_for_log(message, 180))
-        }
-        _ => summarize_text_for_log(&error.to_string(), 180),
-    }
-}
-
-fn summarize_upstream_body(body: &str) -> String {
-    if let Ok(json_body) = serde_json::from_str::<Value>(body) {
-        if let Some(message) = extract_json_error_message(&json_body) {
-            return summarize_text_for_log(&message, 180);
-        }
-
-        if let Ok(compact_json) = serde_json::to_string(&json_body) {
-            return summarize_text_for_log(&compact_json, 180);
-        }
-    }
-
-    summarize_text_for_log(body, 180)
-}
-
-fn extract_json_error_message(body: &Value) -> Option<String> {
-    let candidates = [
-        body.pointer("/error/message"),
-        body.pointer("/message"),
-        body.pointer("/detail"),
-        body.pointer("/error"),
-    ];
-
-    candidates
-        .into_iter()
-        .flatten()
-        .find_map(|value| value.as_str().map(ToString::to_string))
+    DiagnosticError::from(error).to_string()
 }
 
 fn split_endpoint_and_query(endpoint: &str) -> (&str, Option<&str>) {
@@ -4284,19 +4364,6 @@ fn map_reqwest_send_error(error: reqwest::Error) -> ProxyError {
     }
 }
 
-fn summarize_text_for_log(text: &str, max_chars: usize) -> String {
-    let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let trimmed = normalized.trim();
-
-    if trimmed.chars().count() <= max_chars {
-        return trimmed.to_string();
-    }
-
-    let truncated: String = trimmed.chars().take(max_chars).collect();
-    let truncated = truncated.trim_end();
-    format!("{truncated}...")
-}
-
 fn apply_local_proxy_body_overrides(
     body: &mut Value,
     overrides: &LocalProxyRequestOverrides,
@@ -4625,9 +4692,8 @@ mod tests {
 
         assert_eq!(code, log_fwd::SINGLE_PROVIDER_FAILED);
         assert!(message.contains("Provider PackyCode-response 请求失败"));
-        assert!(message.contains("上游 HTTP 429"));
-        // 上游错误消息保留(截断)，用于诊断失败原因。
-        assert!(message.contains("rate limit exceeded"));
+        assert!(message.contains("RateLimited (HTTP 429)"));
+        assert!(!message.contains("rate limit exceeded"));
         assert!(!message.contains("切换下一个"));
     }
 
@@ -4639,7 +4705,8 @@ mod tests {
 
         assert_eq!(code, log_fwd::PROVIDER_FAILED_RETRY);
         assert!(message.contains("继续尝试下一个 (1/3)"));
-        assert!(message.contains("请求超时"));
+        assert!(message.contains("Timeout"));
+        assert!(!message.contains("upstream timed out"));
     }
 
     #[test]
@@ -4656,14 +4723,8 @@ mod tests {
 
         assert_eq!(code, log_fwd::ALL_PROVIDERS_FAILED);
         assert!(message.contains("已尝试 2/2 个 Provider，均失败"));
-        assert!(message.contains("connection reset by peer"));
-    }
-
-    #[test]
-    fn summarize_text_for_log_collapses_whitespace_and_truncates() {
-        let summary = summarize_text_for_log("line1\n\n line2   line3", 12);
-
-        assert_eq!(summary, "line1 line2...");
+        assert!(message.contains("Network"));
+        assert!(!message.contains("connection reset by peer"));
     }
 
     #[test]
@@ -6442,7 +6503,14 @@ mod tests {
         let owned_provider = provider.clone();
         let owned = tokio::spawn(async move {
             owned_fwd
-                .wait_for_rate_limit_recovery(&owned_provider, "codex", 2, 1)
+                .wait_for_rate_limit_recovery(
+                    &owned_provider,
+                    "codex",
+                    2,
+                    1,
+                    Reason::RetryAfter,
+                    None,
+                )
                 .await
         });
         tokio::time::timeout(Duration::from_secs(1), async {
@@ -6526,7 +6594,7 @@ mod tests {
         let provider = codex_api_provider("a", "http://127.0.0.1:1");
         let result = tokio::time::timeout(
             Duration::from_millis(750),
-            fwd.wait_for_rate_limit_recovery(&provider, "codex", 1, 1),
+            fwd.wait_for_rate_limit_recovery(&provider, "codex", 1, 1, Reason::RetryAfter, None),
         )
         .await
         .unwrap();

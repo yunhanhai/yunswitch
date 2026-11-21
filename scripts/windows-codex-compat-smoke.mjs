@@ -1,7 +1,9 @@
 // Called only after windows-release-smoke.mjs validates a disposable runner.
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { createServer } from "node:http";
 import { connect } from "node:net";
+import { promisify } from "node:util";
 import { gzipSync, brotliCompressSync } from "node:zlib";
 
 async function openCompatibilitySettings(cdp, until) {
@@ -81,6 +83,9 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
   let recoveredAt = 0;
   let renewedNotBefore = 0;
   let firstRenewedRecovery = 0;
+  const snapshot = () => cdp.invoke("get_request_diagnostics");
+  const detail = (id) => cdp.invoke("get_request_diagnostic_detail", { id });
+  const latest = async () => detail((await snapshot()).recent[0].id);
   function sendStream(response, text) {
     const coding = scenario.includes("gzip")
       ? "gzip"
@@ -113,6 +118,19 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
         body,
       });
       hits += 1;
+      if (scenario === "diagnostic-timeout") return;
+      if (
+        scenario === "diagnostic-failover" &&
+        request.headers.authorization === "Bearer fake-yunswitch-codex-key"
+      ) {
+        response.writeHead(503, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            error: { message: "private simulated gateway error" },
+          }),
+        );
+        return;
+      }
       if (scenario === "parallel-recovery" || scenario === "renewed-recovery") {
         if (hits <= 2) {
           parallelInitialResponses.push(response);
@@ -422,6 +440,22 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
     assert.equal(disabled.status, 400);
     assert.match(disabled.text, /invalid_encrypted_content/);
     assert.equal(hits, 1);
+    const privateRecord = await latest();
+    const safe = JSON.stringify(privateRecord);
+    for (const value of [
+      ciphertext,
+      "fake-client-key",
+      "fake-yunswitch-codex-key",
+      "ci-model",
+      "Plain history",
+      "Plain handoff",
+      "Tool result",
+      "user-data",
+      "Synthetic pool cannot decrypt history",
+    ]) {
+      assert.ok(!safe.includes(value), `Diagnostic record exposed ${value}`);
+    }
+    assert.equal(privateRecord.current.error.class, "invalidRequest");
     assert.equal(
       requests.at(-1).authorization,
       "Bearer fake-yunswitch-codex-key",
@@ -615,7 +649,57 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
     assert.equal(hits, 1);
     assert.equal(partial.text.match(/only-once/g)?.length, 1);
     assert.match(partial.text, /response.failed/);
+    const partialTrace = await latest();
+    assert.equal(partialTrace.current.phase, "failed");
+    assert.equal(partialTrace.attempts, 1);
+    assert.ok(partialTrace.steps.some((step) => step.phase === "streaming"));
+    assert.ok(!JSON.stringify(partialTrace).includes("only-once"));
     check(label + " Codex errors after output never replay text or tools");
+    await until(
+      () =>
+        cdp.evaluate(`(() => {
+      const panel = document.querySelector('[data-request-diagnostics]');
+      if (panel) return true;
+      const trigger = document.getElementById('request-diagnostics-trigger');
+      if (trigger?.getAttribute('aria-expanded') === 'false') trigger.click();
+      return false;
+    })()`),
+      "open request diagnostics",
+    );
+    await until(
+      () =>
+        cdp.evaluate(`(() => {
+      const row = document.querySelector('[data-diagnostic-id="${partialTrace.id}"]');
+      const button = row?.querySelector('button[aria-expanded]');
+      if (!button) return false;
+      if (button.getAttribute('aria-expanded') === 'false') button.click();
+      const copy = row.querySelector('[data-diagnostic-copy]');
+      if (!copy) return false;
+      row.scrollIntoView({block: 'center'});
+      copy.click();
+      return true;
+    })()`),
+      "open and copy a failed request",
+    );
+    await until(
+      () =>
+        cdp.evaluate(
+          `Boolean(document.querySelector('[data-diagnostic-id="${partialTrace.id}"] [role="status"]')?.textContent.trim())`,
+        ),
+      "clipboard action completes",
+    );
+    const clipboard = await promisify(execFile)(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", "Get-Clipboard -Raw"],
+      { windowsHide: true, timeout: 10000 },
+    );
+    const { schemaVersion, ...exported } = JSON.parse(clipboard.stdout);
+    assert.equal(schemaVersion, 1);
+    assert.deepEqual(exported, partialTrace);
+    await cdp.screenshot(
+      `${label.replaceAll(" ", "-")}-request-diagnostics.png`,
+    );
+    check(label + " request diagnostics UI and redacted clipboard");
 
     scenario = "always-stream-429";
     hits = 0;
@@ -741,6 +825,9 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
         "cancelled request enters wait",
       );
       assert.equal(hits, 1);
+      const waitingId = (await snapshot()).active.find(
+        (row) => row.current.phase === "coolingDown",
+      ).id;
       const concurrent = await send({
         model: "ci-model",
         input: "Concurrent success",
@@ -755,6 +842,9 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
         const state = await cdp.invoke("get_proxy_status");
         return state.active_connections === 0 && !state.rate_limit_waiting;
       }, "cancelled request cleans waiting and connection state");
+      const cancelled = await detail(waitingId);
+      assert.equal(cancelled.current.phase, "cancelled");
+      assert.equal(cancelled.current.reason, "clientDisconnected");
       assert.equal((await cdp.invoke("get_proxy_status")).last_error, null);
       await new Promise((done) => setTimeout(done, 5200));
       assert.equal(hits, 2, "cancelled request retried after its wait");
@@ -885,10 +975,24 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
     recoveryActive = 0;
     recoveryPeak = 0;
     parallelInitialResponses = [];
-    const parallel = await Promise.all([
+    const parallelPending = Promise.all([
       send({ model: "ci-model", input: "Parallel one", stream: true }),
       send({ model: "ci-model", input: "Parallel two", stream: true }),
     ]);
+    const parallelState = await until(
+      async () => {
+        const { active } = await snapshot();
+        return (
+          active.length === 2 &&
+          active.some((row) => row.current.phase === "coolingDown") &&
+          active.some((row) => row.current.phase === "recoveryQueued") &&
+          active
+        );
+      },
+      "diagnostics show both concurrent recovery requests",
+      3500,
+    );
+    const parallel = await parallelPending;
     for (const outcome of parallel) {
       assert.equal(outcome.status, 200, outcome.text);
       assert.match(outcome.text, /YunSwitch Codex smoke/);
@@ -900,6 +1004,12 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
       "rate-limit recovery requests must not overlap",
     );
     assert.ok(!(await cdp.invoke("get_proxy_status")).rate_limit_waiting);
+    for (const row of parallelState) {
+      const completed = await detail(row.id);
+      assert.equal(completed.current.phase, "succeeded");
+      assert.equal(completed.attempts, 2);
+    }
+    check(label + " concurrent diagnostics distinguish cooldown and queue");
     check(
       label +
         " Codex parallel rate limits recover one request at a time per provider",
@@ -930,6 +1040,15 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
       const recovered = await extending;
       assert.equal(recovered.status, 200, recovered.text);
       assert.equal(hits, 3);
+      const extendedTrace = await latest();
+      assert.ok(
+        extendedTrace.steps.some(
+          (step) =>
+            step.reason === "sharedCooldown" &&
+            step.plannedWaitMs > 0 &&
+            step.elapsedMs > 0,
+        ),
+      );
       assert.ok(
         recoveredAt >= sharedNotBefore - 25,
         "retry preceded the newer shared cooldown",
@@ -953,6 +1072,13 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
     for (const outcome of renewed)
       assert.equal(outcome.status, 200, outcome.text);
     assert.equal(hits, 5);
+    const renewedTraces = await Promise.all(
+      (await snapshot()).recent.slice(0, 2).map((row) => detail(row.id)),
+    );
+    assert.deepEqual(
+      renewedTraces.map((trace) => trace.attempts).sort(),
+      [2, 3],
+    );
     assert.ok(
       firstRenewedRecovery >= renewedNotBefore - 25,
       "queued recovery ignored a renewed limit",
@@ -989,6 +1115,128 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
       label +
         " Codex HTTP quota exhaustion never enters the rate limit retry loop",
     );
+
+    // A second configured provider shares the loopback server. No live client
+    // configuration or external endpoints enter the fixture.
+    const backup = {
+      ...provider,
+      id: "yunswitch-ci-diagnostics-backup",
+      name: "CI diagnostic backup",
+      settingsConfig: {
+        ...provider.settingsConfig,
+        auth: { OPENAI_API_KEY: "fake-yunswitch-diagnostics-backup" },
+      },
+    };
+    await cdp.invoke("add_provider", {
+      app: "codex",
+      provider: backup,
+      addToLive: false,
+    });
+    try {
+      for (const id of [provider.id, backup.id]) {
+        await cdp.invoke("add_to_failover_queue", {
+          appType: "codex",
+          providerId: id,
+        });
+        await cdp.invoke("reset_circuit_breaker", {
+          appType: "codex",
+          providerId: id,
+        });
+      }
+      await cdp.invoke("update_proxy_config_for_app", {
+        config: {
+          ...proxyBefore,
+          autoFailoverEnabled: true,
+          maxRetries: 1,
+          sameProviderRetries: 1,
+          sameProviderRetryBackoffMs: 50,
+          sameProviderRetryMaxBackoffMs: 50,
+          streamingFirstByteTimeout: 1,
+          rateLimitRetryEnabled: false,
+        },
+      });
+      hits = 0;
+      scenario = "diagnostic-failover";
+      assert.equal(
+        (
+          await send({
+            model: "ci-model",
+            input: "Diagnostic failover",
+            stream: true,
+          })
+        ).status,
+        200,
+      );
+      const switched = await latest();
+      assert.equal(switched.attempts, 3);
+      assert.equal(hits, 3);
+      assert.ok(
+        switched.steps.some(
+          (step) => step.phase === "retrying" && step.plannedWaitMs != null,
+        ),
+      );
+      assert.ok(switched.steps.some((step) => step.phase === "failingOver"));
+      const localLabels = await cdp.invoke(
+        "get_request_diagnostic_provider_labels",
+        { id: switched.id },
+      );
+      assert.equal(localLabels[switched.current.providerRef], backup.name);
+      assert.ok(
+        !JSON.stringify(switched).includes("private simulated gateway error"),
+      );
+      check(
+        label +
+          " diagnostics correlate same-provider retry and backup selection",
+      );
+
+      scenario = "diagnostic-timeout";
+      assert.equal(
+        (
+          await send({
+            model: "ci-model",
+            input: "Diagnostic timeout",
+            stream: true,
+          })
+        ).status,
+        504,
+      );
+      assert.equal((await latest()).current.phase, "timedOut");
+
+      scenario = "always-429";
+      await cdp.invoke("update_proxy_config_for_app", {
+        config: {
+          ...proxyBefore,
+          autoFailoverEnabled: false,
+          rateLimitRetryEnabled: true,
+          rateLimitMaxWaitSecs: 10,
+        },
+      });
+      scenario = "cancel-wait";
+      const stopped = send({
+        model: "ci-model",
+        input: "Cancelled retry",
+        stream: true,
+      }).catch(() => null);
+      const stoppedId = await until(async () => {
+        const { active } = await snapshot();
+        return active.find((row) => row.current.phase === "coolingDown")?.id;
+      }, "wait before stopping the proxy");
+      await cdp.invoke("stop_proxy_with_restore");
+      proxyStarted = false;
+      assert.equal(await stopped, null);
+      assert.deepEqual((await snapshot()).active, []);
+      assert.equal((await detail(stoppedId)).current.reason, "proxyStopped");
+      check(
+        label + " diagnosis records timeout and clears active requests on stop",
+      );
+    } finally {
+      await cdp.invoke("switch_provider", { app: "codex", id: provider.id });
+      await cdp.invoke("delete_provider", { app: "codex", id: backup.id });
+      await cdp.invoke("remove_from_failover_queue", {
+        appType: "codex",
+        providerId: provider.id,
+      });
+    }
     // Preserve the established relaunch acceptance preference.
     await setCompatibility(cdp, until, true);
   } finally {

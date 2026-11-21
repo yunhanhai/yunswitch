@@ -10,10 +10,22 @@ import type {
 
 export const proxyKeys = {
   status: ["proxyStatus"] as const,
+  rateLimitWaits: ["proxyRateLimitWaits"] as const,
   takeoverStatus: ["proxyTakeoverStatus"] as const,
   globalConfig: ["globalProxyConfig"] as const,
   appConfig: (appType: string) => ["appProxyConfig", appType] as const,
 };
+
+export function useProxyRateLimitWaits(enabled: boolean) {
+  const query = useQuery({
+    queryKey: proxyKeys.rateLimitWaits,
+    queryFn: () => proxyApi.getProxyRateLimitWaits(),
+    enabled,
+    refetchInterval: enabled ? 1000 : false,
+    gcTime: 0,
+  });
+  return { ...query, data: enabled ? query.data : [] };
+}
 
 // ========== 代理服务器状态 Hooks ==========
 
