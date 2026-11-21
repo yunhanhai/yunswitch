@@ -112,6 +112,19 @@ fn cache_is_in_retry_backoff(snapshot: &ModelCatalogSnapshot, now: u64) -> bool 
             || snapshot.last_attempt_at_secs > snapshot.fetched_at_secs)
 }
 
+fn snapshot_changed_since(
+    previous: Option<&ModelCatalogSnapshot>,
+    current: &ModelCatalogSnapshot,
+) -> bool {
+    let Some(previous) = previous else {
+        return true;
+    };
+    previous.fetched_at_secs != current.fetched_at_secs
+        || previous.last_attempt_at_secs != current.last_attempt_at_secs
+        || previous.vendor_error != current.vendor_error
+        || previous.models != current.models
+}
+
 pub(crate) fn provider_key(params: &FetchCatalogParams) -> String {
     // Cache identity follows the complete model-list request, but persistent
     // cache files contain only a digest. Never persist URLs, API keys, custom
@@ -460,6 +473,11 @@ async fn fetch_or_wait(
     stale: Option<ModelCatalogSnapshot>,
 ) -> Result<ModelCatalogSnapshot, AppError> {
     if let Some(_lease) = RefreshLease::claim(&key) {
+        if let Some(current) = get_cached_catalog(&key)? {
+            if snapshot_changed_since(stale.as_ref(), &current) {
+                return Ok(current);
+            }
+        }
         refresh_catalog(&db, &params, &key, stale).await
     } else if let Some(snapshot) = wait_for_refresh(&key, Duration::from_secs(30)).await? {
         Ok(snapshot)
@@ -653,6 +671,26 @@ mod tests {
             &stale,
             20 + MODEL_CATALOG_RETRY_SECS
         ));
+    }
+
+    #[test]
+    fn a_newer_snapshot_wins_when_another_initial_fetch_finished_first() {
+        let previous = ModelCatalogSnapshot {
+            version: MODEL_CATALOG_VERSION,
+            fetched_at_secs: 10,
+            provider_key: "synthetic-cache-hash".into(),
+            models: Vec::new(),
+            vendor_error: None,
+            last_attempt_at_secs: 10,
+            refreshing: false,
+        };
+        let mut current = previous.clone();
+        current.fetched_at_secs = 11;
+        current.last_attempt_at_secs = 11;
+
+        assert!(snapshot_changed_since(None, &current));
+        assert!(snapshot_changed_since(Some(&previous), &current));
+        assert!(!snapshot_changed_since(Some(&previous), &previous));
     }
 
     #[test]

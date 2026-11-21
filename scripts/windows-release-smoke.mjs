@@ -500,6 +500,7 @@ async function exerciseModelCatalog(cdp, label) {
       );
     };
     if (responseMode === "refresh-success") setTimeout(send, 700);
+    else if (responseMode === "initial") setTimeout(send, 500);
     else send();
   });
   await new Promise((done) => catalogServer.listen(0, "127.0.0.1", done));
@@ -528,16 +529,30 @@ async function exerciseModelCatalog(cdp, label) {
     cdp.invoke("get_model_catalog_cache_status", params);
 
   try {
-    const initial = await cdp.invoke("get_model_catalog", params);
+    const initialBurst = await Promise.all(
+      Array.from({ length: 5 }, () => cdp.invoke("get_model_catalog", params)),
+    );
+    const initial = initialBurst[0];
     assert.ok(
       initial.models.some((model) => model.id === "synthetic-model-v1"),
+    );
+    assert.ok(
+      initialBurst.every(
+        (snapshot) => snapshot.providerKey === initial.providerKey,
+      ),
     );
     const providerKey = initial.providerKey;
     assert.match(providerKey, /^v2-[0-9a-f]{64}$/);
     assert.equal(requests.length, 1);
     assert.equal(requests[0].path, "/v1/models");
     assert.equal(requests[0].authorization, "Bearer fake-model-catalog-secret");
-    check(`${label} model catalog uses an isolated hashed request identity`);
+    check(
+      `${label} concurrent initial model loads share one hashed request identity`,
+      {
+        concurrentReads: initialBurst.length,
+        upstreamRequests: requests.length,
+      },
+    );
 
     responseMode = "refresh-success";
     await expireCache();
