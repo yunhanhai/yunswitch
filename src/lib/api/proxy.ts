@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ProxyStatus,
+  RateLimitWaiting,
   ProxyServerInfo,
   ProxyTakeoverStatus,
   GlobalProxyConfig,
@@ -32,6 +33,10 @@ export const proxyApi = {
   // 获取代理服务器状态
   async getProxyStatus(): Promise<ProxyStatus> {
     return invoke("get_proxy_status");
+  },
+
+  async getProxyRateLimitWaits(): Promise<RateLimitWaiting[]> {
+    return invoke("get_proxy_rate_limit_waits");
   },
 
   async getRequestDiagnostics(): Promise<RequestDiagnosticsSnapshot> {

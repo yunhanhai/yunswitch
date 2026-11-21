@@ -170,15 +170,20 @@ async fn concurrent_diagnostics_follow_shared_and_renewed_cooldowns() {
         .unwrap()["id"]
         .clone();
     assert_ne!(first_id, second_id);
-    assert_eq!(
-        fixture
-            .proxy
-            .get_status()
-            .await
-            .rate_limit_waiting_requests
-            .len(),
-        2
-    );
+    let http_status = serde_json::to_value(fixture.proxy.get_status().await).unwrap();
+    assert!(http_status.get("rateLimitWaitingRequests").is_none());
+    let mut waits = fixture.proxy.rate_limit_waits_for_ui().await;
+    timeout(Duration::from_secs(2), async {
+        loop {
+            waits = fixture.proxy.rate_limit_waits_for_ui().await;
+            if waits.len() == 2 {
+                break;
+            }
+            sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("both independent waits are visible to the desktop");
     for pending in [first, second] {
         let response = pending.await.unwrap().unwrap();
         assert_eq!(response.status(), StatusCode::OK);

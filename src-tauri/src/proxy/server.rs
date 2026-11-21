@@ -289,8 +289,6 @@ impl ProxyServer {
 
     pub async fn get_status(&self) -> ProxyStatus {
         let mut status = self.state.status.read().await.clone();
-        status.rate_limit_waiting_requests =
-            status.active_rate_limit_waits.values().cloned().collect();
 
         // 计算运行时间
         if let Some(start) = *self.state.start_time.read().await {
@@ -309,6 +307,17 @@ impl ProxyServer {
             .collect();
 
         status
+    }
+
+    pub(crate) async fn rate_limit_waits_for_ui(&self) -> Vec<RateLimitWaiting> {
+        self.state
+            .status
+            .read()
+            .await
+            .active_rate_limit_waits
+            .values()
+            .cloned()
+            .collect()
     }
 
     /// 更新某个应用类型当前“目标供应商”（用于 UI 展示 active_targets）

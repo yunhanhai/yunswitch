@@ -108,10 +108,6 @@ pub struct ProxyStatus {
     /// clear another request's entry; cancellation removes only its owner.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rate_limit_waiting: Option<RateLimitWaiting>,
-    /// All live waits for the desktop status view. The HTTP status endpoint
-    /// keeps its existing snapshot shape.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub rate_limit_waiting_requests: Vec<RateLimitWaiting>,
     /// Request-owned waits; the public snapshot shows the most recent live wait.
     /// Runtime ownership must never be persisted or sent to the frontend.
     #[serde(skip)]

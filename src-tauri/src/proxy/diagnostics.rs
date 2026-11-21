@@ -327,7 +327,10 @@ struct Registry {
 
 impl Registry {
     fn prune(&mut self) {
-        let now = Instant::now();
+        self.prune_at(Instant::now());
+    }
+
+    fn prune_at(&mut self, now: Instant) {
         self.recent.retain(|row| {
             row.ended
                 .is_some_and(|ended| now.duration_since(ended) < RETENTION)
@@ -643,11 +646,20 @@ mod tests {
 
         let expired = {
             let mut registry = store.lock();
-            let record = registry.recent.front_mut().unwrap();
-            record.ended = Some(Instant::now() - RETENTION);
-            record.id.clone()
+            let ended = Instant::now();
+            let id = {
+                let record = registry.recent.front_mut().unwrap();
+                record.ended = Some(ended);
+                record.id.clone()
+            };
+            registry.prune_at(ended + RETENTION + Duration::from_secs(1));
+            id
         };
-        assert!(store.detail(&expired).is_none());
+        assert!(store
+            .lock()
+            .recent
+            .iter()
+            .all(|record| record.id != expired));
 
         store.stop();
         assert!(store.snapshot().active.is_empty());

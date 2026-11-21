@@ -17,7 +17,7 @@ import {
   HelpCircle,
 } from "lucide-react";
 import { useResilienceSummary } from "@/lib/query/failover";
-import { useProxyStatusQuery } from "@/lib/query/proxy";
+import { useProxyRateLimitWaits, useProxyStatusQuery } from "@/lib/query/proxy";
 import { useRoutingGroups } from "@/lib/query/routing-groups";
 
 interface ResilienceSummaryBarProps {
@@ -33,6 +33,9 @@ export function ResilienceSummaryBar({
   const { t } = useTranslation();
   const { data: summary } = useResilienceSummary(appType);
   const { data: proxyStatus } = useProxyStatusQuery();
+  const { data: requestWaits = [] } = useProxyRateLimitWaits(
+    proxyStatus?.running ?? false,
+  );
   const shouldFetchGroups = effectiveRouteSize == null;
   const { data: routingGroups = [] } = useRoutingGroups(
     appType,
@@ -43,10 +46,9 @@ export function ResilienceSummaryBar({
     routingGroups
       .filter((entry) => entry.group.enabled)
       .flatMap((entry) => entry.members).length;
-  const waitingCount =
-    proxyStatus?.rate_limit_waiting_requests?.filter(
-      (row) => row.appType === appType,
-    ).length ?? 0;
+  const waitingCount = requestWaits.filter(
+    (row) => row.appType === appType,
+  ).length;
 
   if (!summary) return null;
   const coolingHint =

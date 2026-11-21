@@ -49,7 +49,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { toast } from "sonner";
 import { useProvidersQuery } from "@/lib/query";
 import { useRateLimitCooldowns } from "@/lib/query/failover";
-import { useProxyStatusQuery } from "@/lib/query/proxy";
+import { useProxyRateLimitWaits, useProxyStatusQuery } from "@/lib/query/proxy";
 import {
   useCreateRoutingGroup,
   useDeleteRoutingGroup,
@@ -81,8 +81,11 @@ export function RoutingGroupsPanel({
     [cooldowns],
   );
   const { data: proxyStatus } = useProxyStatusQuery();
+  const { data: requestWaits = [] } = useProxyRateLimitWaits(
+    proxyStatus?.running ?? false,
+  );
   const waitingProviderIds = new Set(
-    proxyStatus?.rate_limit_waiting_requests
+    requestWaits
       ?.filter((wait) => wait.appType === appType)
       .map((wait) => wait.providerId),
   );

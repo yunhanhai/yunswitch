@@ -42,8 +42,6 @@ export interface ProxyStatus {
    * 的等待期间展示"正在等待限流恢复"而非陈旧的 `Provider X 失败`。
    */
   rate_limit_waiting?: RateLimitWaiting | null;
-  /** All live 429 recovery waits in the desktop status snapshot. */
-  rate_limit_waiting_requests?: RateLimitWaiting[];
   active_targets?: ActiveTarget[];
 }
 

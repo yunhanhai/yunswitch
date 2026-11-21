@@ -3872,6 +3872,14 @@ impl ProxyService {
             .map_or_else(Snapshot::default, |diagnostics| diagnostics.snapshot())
     }
 
+    pub(crate) async fn rate_limit_waits_for_ui(&self) -> Vec<RateLimitWaiting> {
+        let server = self.server.read().await;
+        match server.as_ref() {
+            Some(server) => server.rate_limit_waits_for_ui().await,
+            None => Vec::new(),
+        }
+    }
+
     pub(crate) async fn request_diagnostic_detail(&self, id: &str) -> Option<Detail> {
         self.diagnostics
             .read()

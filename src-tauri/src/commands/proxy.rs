@@ -78,6 +78,13 @@ pub async fn get_proxy_status(state: tauri::State<'_, AppState>) -> Result<Proxy
     state.proxy_service.get_status().await
 }
 
+#[tauri::command]
+pub(crate) async fn get_proxy_rate_limit_waits(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<RateLimitWaiting>, String> {
+    Ok(state.proxy_service.rate_limit_waits_for_ui().await)
+}
+
 /// Request lifecycles are available only to the local desktop UI.
 #[tauri::command]
 pub(crate) async fn get_request_diagnostics(
