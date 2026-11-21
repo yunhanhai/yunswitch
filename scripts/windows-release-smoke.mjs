@@ -516,6 +516,7 @@ async function exerciseModelCatalog(cdp, label) {
     ".yunswitch",
     "model-catalog.json",
   );
+  let providerKey;
   const expireCache = async () => {
     const cache = JSON.parse(await readFile(cachePath, "utf8"));
     const snapshot = cache.snapshots[providerKey];
@@ -541,7 +542,7 @@ async function exerciseModelCatalog(cdp, label) {
         (snapshot) => snapshot.providerKey === initial.providerKey,
       ),
     );
-    const providerKey = initial.providerKey;
+    providerKey = initial.providerKey;
     assert.match(providerKey, /^v2-[0-9a-f]{64}$/);
     assert.equal(requests.length, 1);
     assert.equal(requests[0].path, "/v1/models");
