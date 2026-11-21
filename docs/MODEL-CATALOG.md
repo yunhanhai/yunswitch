@@ -11,3 +11,7 @@
 参考 yetone/magpie 公开模型目录的过期缓存刷新、失败后保留已有目录和缓存身份设计：[后台刷新与失败退避](https://github.com/yetone/magpie/blob/40118730018fe48db225f13ff56b8ec2f1d75fa4/internal/catalog/fresh.go)、[目录缓存身份](https://github.com/yetone/magpie/blob/2f1759c96c843a2e82c31c25ee5a976d5e7bdfd7/internal/catalog/cache_key.go)。YunSwitch 按本地供应商 API 重写，没有复制 Magpie 代码或资源。参考细节和许可边界见[来源记录](PROVENANCE.md)。
 
 本轮使用合成缓存数据与回环测试验证；没有真实供应商、个人密钥或付费 API 参与。仍需按真实供应商逐项验证模型列表端点的兼容性。
+
+源码 CI 在 [`44931226144`](https://github.com/yunhanhai/yunswitch/actions/runs/44931226144) 全部通过，覆盖前端、Linux、macOS、Windows 与 Windows+WSL2。Windows clean-runner build-only 验收 [`44928023534`](https://github.com/yunhanhai/yunswitch/actions/runs/44928023534) 的 100 项运行检查通过；模型目录场景在便携包中验证了 5 个并发首次读取只发出 1 个上游请求、5 个过期读取共用 1 次后台刷新、刷新失败保留模型与 60 秒退避、v1 缓存重建，以及密钥和上游错误正文不进入缓存。该 runner 包构建自 `10641b0f`，源码树为 `720bdd3bbedde885e96b8482fb57881f9b878e2b`；最终双端工作分支合并同步提交 `09f1a99a` 的产品树相同，后续仅同步两端提交历史，没有程序文件改动。
+
+验收 MSI SHA-256：`fc0827fc8b0b342b471e11783ae8e88c8df93c0e3dde8bede0cdf0b3bbe4ca52`；便携 ZIP SHA-256：`50ffad6b28f503b8fa853a2e26c3927bbb182712633ab6752a1a2eb86ddadcbd`。这是保留公开 `.8` 版本号的临时 build-only 产物，不是新 Release；其他平台已通过源码 CI，尚未进行本功能的打包安装验收。
