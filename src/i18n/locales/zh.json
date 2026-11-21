@@ -218,7 +218,9 @@
       "clearFilter": "清除筛选",
       "emptyHint": "尚未加载，点击上方加载获取模型列表",
       "emptyWithError": "拉取失败，暂无可用模型",
-      "filterEmpty": "无匹配模型，尝试调整筛选条件"
+      "filterEmpty": "无匹配模型，尝试调整筛选条件",
+      "refreshing": "正在后台更新模型目录，当前仍可使用已缓存的模型。",
+      "errorPrivacyHint": "为保护隐私，仅显示错误类别和 HTTP 状态，不保存上游错误正文。"
     },
     "sortBy": "排序方式",
     "sortManual": "手动排序",

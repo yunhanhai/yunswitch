@@ -15,6 +15,16 @@ import {
   type ModelCatalogSnapshot,
 } from "@/lib/api/model-fetch";
 
+async function modelFetchKeyFingerprint(value: string): Promise<string> {
+  const digest = await globalThis.crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value),
+  );
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
 /** 轻量"仅显示可用模型"开关，供 ModelMappingEditor 复用。 */
 export function ModelCatalogPicker({
   models,
@@ -146,6 +156,7 @@ export function ModelCatalogPanel({
   const [filter, setFilter] = useState("");
   const [showVendorOnly, setShowVendorOnly] = useState(false);
   const lastAutoFetchKeyRef = useRef<string | null>(null);
+  const credentialFingerprintRef = useRef<string | null>(null);
   const snapshotRef = useRef<ModelCatalogSnapshot | null>(null);
   useEffect(() => {
     snapshotRef.current = snapshot;
@@ -198,9 +209,9 @@ export function ModelCatalogPanel({
         const fallback: ModelCatalogSnapshot = prev
           ? { ...prev, vendorError: String(e) }
           : {
-              version: 1,
+              version: 2,
               fetchedAtSecs: Math.floor(Date.now() / 1000),
-              providerKey: baseUrl,
+              providerKey: "",
               models: [],
               vendorError: String(e),
             };
@@ -213,6 +224,59 @@ export function ModelCatalogPanel({
     },
     [baseUrl, apiKey, isFullUrl, modelsUrl, apiFormat, onSnapshotChange],
   );
+
+  useEffect(() => {
+    if (!snapshot?.refreshing || !baseUrl.trim() || !apiKey.trim()) return;
+    let cancelled = false;
+    let timeout: number | undefined;
+    const poll = async () => {
+      try {
+        const next = await getModelCatalog(
+          baseUrl,
+          apiKey,
+          isFullUrl,
+          modelsUrl,
+          undefined,
+          {
+            apiFormat,
+          },
+        );
+        if (!cancelled) {
+          setSnapshot(next);
+          onSnapshotChange?.(next);
+          if (next.refreshing) {
+            timeout = window.setTimeout(() => void poll(), 1200);
+          }
+        }
+      } catch (error) {
+        if (cancelled) return;
+        const current = snapshotRef.current;
+        if (current) {
+          const failed = {
+            ...current,
+            refreshing: false,
+            vendorError: String(error),
+          };
+          setSnapshot(failed);
+          onSnapshotChange?.(failed);
+        }
+      }
+    };
+    timeout = window.setTimeout(() => void poll(), 1200);
+    return () => {
+      cancelled = true;
+      if (timeout !== undefined) window.clearTimeout(timeout);
+    };
+  }, [
+    snapshot?.refreshing,
+    baseUrl,
+    apiKey,
+    isFullUrl,
+    modelsUrl,
+    apiFormat,
+    onSnapshotChange,
+  ]);
+
   const fetchCatalog = useCallback(
     async (force: boolean) => {
       await doFetch(force);
@@ -240,26 +304,69 @@ export function ModelCatalogPanel({
     setShowVendorOnly(false);
   }, []);
 
+  useEffect(() => {
+    const key = apiKey.trim();
+    if (!key) {
+      if (credentialFingerprintRef.current !== null) {
+        credentialFingerprintRef.current = null;
+        lastAutoFetchKeyRef.current = null;
+        snapshotRef.current = null;
+        setSnapshot(null);
+        onSnapshotChange?.(null);
+      }
+      return;
+    }
+    let cancelled = false;
+    void modelFetchKeyFingerprint(key)
+      .then((fingerprint) => {
+        if (cancelled) return;
+        if (
+          credentialFingerprintRef.current !== null &&
+          credentialFingerprintRef.current !== fingerprint
+        ) {
+          lastAutoFetchKeyRef.current = null;
+          snapshotRef.current = null;
+          setSnapshot(null);
+          onSnapshotChange?.(null);
+        }
+        credentialFingerprintRef.current = fingerprint;
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [apiKey, onSnapshotChange]);
+
   // 单字段添加：预设已填好 baseUrl，粘贴 Key 后自动拉目录（防抖 600ms，同一 key 不重复触发）
   useEffect(() => {
     if (!autoFetch) return;
     const keyTrimmed = apiKey.trim();
     if (!baseUrl.trim() || !keyTrimmed) return;
     if (keyTrimmed.length < 8) return;
-    const fetchKey = `${baseUrl}::${isFullUrl ? "1" : "0"}::${apiFormat ?? ""}::${modelsUrl ?? ""}::${keyTrimmed.slice(0, 16)}`;
-    if (lastAutoFetchKeyRef.current === fetchKey) return;
-    const cur = snapshotRef.current;
-    if (cur && cur.models.length > 0 && !cur.vendorError) {
-      lastAutoFetchKeyRef.current = fetchKey;
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      // 先占位防并发抖动期间重复进队
-      if (lastAutoFetchKeyRef.current === fetchKey) return;
-      lastAutoFetchKeyRef.current = fetchKey;
-      void doFetch(false);
-    }, 600);
-    return () => window.clearTimeout(timer);
+    let cancelled = false;
+    let timer: number | undefined;
+    void modelFetchKeyFingerprint(keyTrimmed)
+      .then((fingerprint) => {
+        if (cancelled) return;
+        const fetchKey = `${baseUrl}::${isFullUrl ? "1" : "0"}::${apiFormat ?? ""}::${modelsUrl ?? ""}::${fingerprint}`;
+        if (lastAutoFetchKeyRef.current === fetchKey) return;
+        const cur = snapshotRef.current;
+        if (cur && cur.models.length > 0 && !cur.vendorError) {
+          lastAutoFetchKeyRef.current = fetchKey;
+          return;
+        }
+        timer = window.setTimeout(() => {
+          // Reserve before fetching so rerenders cannot queue a duplicate.
+          if (lastAutoFetchKeyRef.current === fetchKey) return;
+          lastAutoFetchKeyRef.current = fetchKey;
+          void doFetch(false);
+        }, 600);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
   }, [autoFetch, baseUrl, apiKey, isFullUrl, modelsUrl, apiFormat, doFetch]);
 
   // 切换预设/端点时重置自动拉取记忆，允许对新 baseUrl 再次自动拉取
@@ -314,6 +421,11 @@ export function ModelCatalogPanel({
           })}
         </p>
       ) : null}
+      {snapshot?.refreshing ? (
+        <p className="text-[11px] text-muted-foreground" role="status">
+          {t("provider.modelCatalog.refreshing")}
+        </p>
+      ) : null}
       <div className="flex items-center gap-2">
         <Input
           placeholder={t("provider.modelCatalog.filterPlaceholder", {
@@ -342,6 +454,9 @@ export function ModelCatalogPanel({
               {snapshot.vendorError}
             </p>
           </div>
+          <p className="text-[11px] text-muted-foreground">
+            {t("provider.modelCatalog.errorPrivacyHint")}
+          </p>
           <div className="flex flex-wrap items-center gap-1.5">
             <Button
               variant="outline"
