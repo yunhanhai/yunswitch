@@ -545,6 +545,19 @@ async function exerciseModelCatalog(cdp, label) {
       })()`),
       "open provider form for model catalog",
     );
+    await until(
+      () =>
+        cdp.evaluate(`(() => {
+        const notice = [...document.querySelectorAll('[role="dialog"]')]
+          .find(item => /About Common Config|关于通用配置/.test(item.innerText));
+        if (!notice) return true;
+        const confirm = [...notice.querySelectorAll('button')]
+          .find(item => /^(Got it|我知道了)$/.test(item.innerText.trim()));
+        confirm?.click();
+        return false;
+      })()`),
+      "dismiss the common configuration notice before catalog checks",
+    );
     await cdp.evaluate(`(() => {
       const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
       for (const [id, value] of ${JSON.stringify([
@@ -563,6 +576,7 @@ async function exerciseModelCatalog(cdp, label) {
         const heading = [...document.querySelectorAll('span')]
           .find(item => /^(Model catalog|模型目录)$/.test(item.textContent));
         if (!heading) return false;
+        if (document.querySelector('[role="dialog"]')) return false;
         heading.parentElement.parentElement.scrollIntoView({block: 'center'});
         return heading.parentElement.parentElement.innerText.includes('synthetic-model');
       })()`),
