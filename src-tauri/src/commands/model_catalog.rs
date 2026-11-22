@@ -27,7 +27,7 @@ pub async fn get_model_catalog(
         api_format,
         request_headers,
     };
-    crate::services::model_catalog::fetch_catalog_for_provider(&state.db, params, false)
+    crate::services::model_catalog::fetch_catalog_for_provider(state.db.clone(), params, false)
         .await
         .map_err(|e| e.to_string())
 }
@@ -54,24 +54,32 @@ pub async fn refresh_model_catalog(
         api_format,
         request_headers,
     };
-    crate::services::model_catalog::fetch_catalog_for_provider(&state.db, params, true)
+    crate::services::model_catalog::fetch_catalog_for_provider(state.db.clone(), params, true)
         .await
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
+// Keep the established flat Tauri IPC arguments compatible with old renderers.
+#[allow(clippy::too_many_arguments)]
 pub async fn get_model_catalog_cache_status(
     base_url: String,
+    api_key: Option<String>,
+    is_full_url: Option<bool>,
+    models_url: Option<String>,
+    custom_user_agent: Option<String>,
     api_format: Option<String>,
+    request_headers: Option<BTreeMap<String, String>>,
 ) -> Result<Option<ModelCatalogSnapshot>, String> {
-    let key = {
-        let base = base_url.trim().trim_end_matches('/').to_ascii_lowercase();
-        let format = api_format.unwrap_or_default().trim().to_ascii_lowercase();
-        if format.is_empty() {
-            base
-        } else {
-            format!("{base}#{format}")
-        }
+    let params = FetchCatalogParams {
+        base_url,
+        api_key: api_key.unwrap_or_default(),
+        is_full_url: is_full_url.unwrap_or(false),
+        models_url_override: models_url,
+        custom_user_agent,
+        api_format,
+        request_headers,
     };
-    crate::services::model_catalog::get_cached_catalog(&key).map_err(|e| e.to_string())
+    let key = crate::services::model_catalog::provider_key(&params);
+    crate::services::model_catalog::cached_catalog_status(&key).map_err(|e| e.to_string())
 }

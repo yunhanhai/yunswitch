@@ -49,6 +49,8 @@ HTTP 解码接线、预算和取消管理由本项目实现，位于 `src-tauri/
 
 [RuoYi](https://gitee.com/y_project/RuoYi)、[RuoYi-Vue-Plus](https://gitee.com/dromara/RuoYi-Vue-Plus) 和 [RuoYi-Vue-Pro](https://gitee.com/zhijiantianya/ruoyi-vue-pro) 用于参考如何说明上游关系、独立维护主体和功能差异；当前没有因此新增这些项目的框架代码。今后若引入代码或资源，应新增对应条目，核查所选版本的许可证，不能沿用“仅参考”的描述。
 
+[yetone/magpie](https://github.com/yetone/magpie) 的模型目录维护启发了过期数据继续可用、后台单飞刷新、失败退避和按请求身份区分缓存等设计。可对照固定提交中的[目录后台刷新](https://github.com/yetone/magpie/blob/40118730018fe48db225f13ff56b8ec2f1d75fa4/internal/catalog/fresh.go)与[缓存身份](https://github.com/yetone/magpie/blob/2f1759c96c843a2e82c31c25ee5a976d5e7bdfd7/internal/catalog/cache_key.go)。YunSwitch 按自身供应商模型端点和 IPC 重新实现，没有复制代码、资源或协议；Magpie 项目标记 MIT，本次仅借鉴公开设计。
+
 ## 后续引入记录
 
 复制、移植或改编第三方实现与资源时，在对应 PR 中填充以下记录，合并后纳入本台账。仅借鉴设计也应说明参考依据与自行实现范围。
