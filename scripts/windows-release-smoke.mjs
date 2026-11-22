@@ -509,7 +509,7 @@ async function exerciseModelCatalog(cdp, label) {
     baseUrl: endpoint,
     apiKey: "fake-model-catalog-secret",
     isFullUrl: false,
-    apiFormat: "openai-responses",
+    apiFormat: "anthropic",
   };
   const cachePath = join(
     process.env.USERPROFILE,
@@ -528,6 +528,54 @@ async function exerciseModelCatalog(cdp, label) {
   };
   const cacheStatus = () =>
     cdp.invoke("get_model_catalog_cache_status", params);
+  const openCatalog = async () => {
+    await until(
+      () =>
+        cdp.evaluate(`(() => {
+        if (document.getElementById('baseUrl')) return true;
+        const button = [...document.querySelectorAll('button[title]')]
+          .find(item => /^(Add New Provider|添加供应商)$/.test(item.title));
+        if (!button) return false;
+        button.click();
+        return false;
+      })()`),
+      "open provider form for model catalog",
+    );
+    await cdp.evaluate(`(() => {
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      for (const [id, value] of ${JSON.stringify([
+        ["baseUrl", endpoint],
+        ["apiKey", params.apiKey],
+      ])}) {
+        const input = document.getElementById(id);
+        if (!input) throw new Error('Missing catalog form input: ' + id);
+        set.call(input, value);
+        input.dispatchEvent(new Event('input', {bubbles: true}));
+      }
+    })()`);
+    await until(
+      () =>
+        cdp.evaluate(`(() => {
+        const heading = [...document.querySelectorAll('span')]
+          .find(item => /^(Model catalog|模型目录)$/.test(item.textContent));
+        if (!heading) return false;
+        heading.parentElement.parentElement.scrollIntoView({block: 'center'});
+        return heading.parentElement.parentElement.innerText.includes('synthetic-model');
+      })()`),
+      "render cached model catalog in provider form",
+    );
+  };
+  const closeCatalog = async () => {
+    await cdp.evaluate(`(() => {
+      const form = document.getElementById('baseUrl');
+      form?.blur();
+      window.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
+    })()`);
+    await until(
+      () => cdp.evaluate("!document.getElementById('baseUrl')"),
+      "close provider form without saving",
+    );
+  };
 
   try {
     const initialBurst = await Promise.all(
@@ -554,6 +602,9 @@ async function exerciseModelCatalog(cdp, label) {
         upstreamRequests: requests.length,
       },
     );
+    await openCatalog();
+    await cdp.screenshot(`${label.replaceAll(" ", "-")}-model-catalog.png`);
+    await closeCatalog();
 
     responseMode = "refresh-success";
     await expireCache();
@@ -618,6 +669,26 @@ async function exerciseModelCatalog(cdp, label) {
     assert.equal(requests.length, 3);
     check(
       `${label} failed catalog refresh retains models and excludes credentials and upstream body`,
+    );
+    await openCatalog();
+    await until(
+      () =>
+        cdp.evaluate(
+          "document.body.innerText.includes('HTTP 502 Bad Gateway')",
+        ),
+      "render safe catalog refresh error",
+    );
+    await cdp.screenshot(
+      `${label.replaceAll(" ", "-")}-model-catalog-error.png`,
+    );
+    await closeCatalog();
+    assert.equal(
+      requests.length,
+      3,
+      "opening the UI respects the error retry backoff",
+    );
+    check(
+      `${label} model catalog UI shows cached models and the safe refresh error`,
     );
 
     const legacy = {
@@ -883,6 +954,7 @@ async function verifyUpgrade(previous, current, installedExe, portableExe) {
     );
   }
   await verifySingleInstance(installedExe);
+  await exerciseModelCatalog(cdp, "upgraded MSI");
   await exerciseCodexCompatibility(cdp, {
     check,
     until,

@@ -200,7 +200,11 @@ fn prune_snapshots(snapshots: &mut HashMap<String, ModelCatalogSnapshot>, now: u
                 )
             })
             .collect();
-        oldest.sort_unstable();
+        oldest.sort_unstable_by(|(left_key, left_time), (right_key, right_time)| {
+            left_time
+                .cmp(right_time)
+                .then_with(|| left_key.cmp(right_key))
+        });
         for (key, _) in oldest
             .into_iter()
             .take(snapshots.len().saturating_sub(MODEL_CATALOG_MAX_SNAPSHOTS))
@@ -731,14 +735,17 @@ mod tests {
         for index in 0..MODEL_CATALOG_MAX_SNAPSHOTS + 4 {
             snapshots.insert(
                 format!("endpoint-{index:03}"),
-                make_snapshot(format!("endpoint-{index:03}"), now + index as u64),
+                make_snapshot(
+                    format!("endpoint-{index:03}"),
+                    now + (MODEL_CATALOG_MAX_SNAPSHOTS + 4 - index) as u64,
+                ),
             );
         }
         prune_snapshots(&mut snapshots, now + 10_000);
         assert_eq!(snapshots.len(), MODEL_CATALOG_MAX_SNAPSHOTS);
         assert!(!snapshots.contains_key("expired"));
-        assert!(snapshots.contains_key("endpoint-259"));
-        assert!(!snapshots.contains_key("endpoint-000"));
+        assert!(snapshots.contains_key("endpoint-000"));
+        assert!(!snapshots.contains_key("endpoint-259"));
     }
 
     #[test]
