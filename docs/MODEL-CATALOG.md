@@ -12,6 +12,10 @@
 
 本轮使用合成缓存数据与回环测试验证；没有真实供应商、个人密钥或付费 API 参与。仍需按真实供应商逐项验证模型列表端点的兼容性。
 
-源码 CI 在 [`44931226144`](https://github.com/yunhanhai/yunswitch/actions/runs/44931226144) 全部通过，覆盖前端、Linux、macOS、Windows 与 Windows+WSL2。Windows clean-runner build-only 验收 [`44928023534`](https://github.com/yunhanhai/yunswitch/actions/runs/44928023534) 的 100 项运行检查通过；模型目录场景在便携包中验证了 5 个并发首次读取只发出 1 个上游请求、5 个过期读取共用 1 次后台刷新、刷新失败保留模型与 60 秒退避、v1 缓存重建，以及密钥和上游错误正文不进入缓存。该 runner 包构建自 `10641b0f`，源码树为 `720bdd3bbedde885e96b8482fb57881f9b878e2b`；最终双端工作分支合并同步提交 `09f1a99a` 的产品树相同，后续仅同步两端提交历史，没有程序文件改动。
+本机 44 项模型目录/模型拉取相关 Rust 测试、4 项面板测试、TypeScript、Prettier、Rust 格式、严格 Clippy 和 renderer 构建通过。审查补充了按更新时间淘汰缓存的修复与逆序回归；接口测试覆盖后台刷新、密钥轮换和迟到响应保护。完整跨平台检查由 GitHub [源码 CI](https://github.com/yunhanhai/yunswitch/actions/runs/44981686760)确认，覆盖前端、Linux、macOS、Windows 与 Windows+WSL2。
 
-验收 MSI SHA-256：`fc0827fc8b0b342b471e11783ae8e88c8df93c0e3dde8bede0cdf0b3bbe4ca52`；便携 ZIP SHA-256：`50ffad6b28f503b8fa853a2e26c3927bbb182712633ab6752a1a2eb86ddadcbd`。这是保留公开 `.8` 版本号的临时 build-only 产物，不是新 Release；其他平台已通过源码 CI，尚未进行本功能的打包安装验收。
+最终 Windows clean-runner [复验 `44983308745`](https://github.com/yunhanhai/yunswitch/actions/runs/44983308745)的 **106 项检查通过，0 项失败**。便携包与 `.7` 升级后的 MSI 均验证了 5 个并发首次读取只发出 1 个上游请求、5 个过期读取共用 1 次后台刷新、失败保留模型并遵守退避、v1 缓存重建、密钥和上游错误正文不进入缓存，以及真实 WebView 中的模型列表与安全错误提示。已回读两种形态的截图，确认首次配置提示未遮挡目录。
+
+包由[构建 `44981182793`](https://github.com/yunhanhai/yunswitch/actions/runs/44981182793)的源码 `f3169e59dbd906d9a106a7c9a9148a4db6b85da0` 生成，验收源码为 `26655f8f51b0f4e39a021b3d982b8fb4ccd6663f`；runner 对产品与许可证文件执行一致性检查，`package-provenance.json` 确认 `productSourcesUnchanged=true`。首次构建验收在升级后的设置页无法定位目录；之后只修改验收导航与首次提示处理，复用原 MSI/ZIP 完成上述复验。
+
+验收 MSI SHA-256：`26cd3aeaa5a420600ce8554ef2c7b9b12147882764aff46a19975e517116c535`；便携 ZIP SHA-256：`e0f21e008142879c353e6bf0219d13552da93e27e8f61b39ac19f7f9e31eabe2`。证据存于本机 `.git/model-catalog-accepted/`。这是保留公开 `.8` 版本号的临时 build-only 产物，不是新 Release；其他平台已通过源码 CI，尚未进行本功能的打包安装验收。
