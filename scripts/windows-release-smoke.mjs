@@ -535,7 +535,11 @@ async function exerciseModelCatalog(cdp, label) {
         if (document.getElementById('baseUrl')) return true;
         const button = [...document.querySelectorAll('button[title]')]
           .find(item => /^(Add New Provider|添加供应商)$/.test(item.title));
-        if (!button) return false;
+        if (!button) {
+          document.querySelector('button:has(svg.lucide-arrow-left)')?.click();
+          return false;
+        }
+        document.querySelector('button[title="Claude Code"]')?.click();
         button.click();
         return false;
       })()`),
