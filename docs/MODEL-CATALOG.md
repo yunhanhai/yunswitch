@@ -1,0 +1,21 @@
+# 动态模型目录缓存
+
+新增供应商时，模型目录继续读取供应商的 /models 列表，并以本机定价表作为补充；供应商实际列表优先。完整模型列表请求（端点、协议、认证及自定义请求头）参与缓存身份计算。持久缓存只存 SHA-256 摘要，不保存模型目录键中的原始 URL、API Key、User-Agent 或请求头值。
+
+使用时在供应商表单的“模型目录”区域点击“加载”或“刷新”；端点过期时继续显示缓存模型，同时提示后台更新。更新失败会保留现有模型并显示有限错误类别，HTTP 错误只显示状态码。错误提示下方说明错误正文不会持久化；“复制错误”只复制该安全分类文本。
+
+成功目录缓存 6 小时。有效缓存立即返回；目录过期后立即返回上一次结果并在后台刷新。UI 显示“正在后台更新”，期间旧模型仍可选。相同身份的请求共用一次刷新；并发首次加载也不会重复请求上游。刷新失败时保留上次成功取得的供应商模型，只更新安全错误分类，并至少等待 60 秒再重试。上游错误正文和传输库原始错误不会保存或展示；UI 保留 HTTP 状态码、超时或连接错误等有限信息。首次且没有缓存时，加载仍同步完成；用户点击“刷新”仍等待刷新结果。同身份并发首次加载最长等待 30 秒。
+
+沿用本地 model-catalog.json 文件；旧缓存键未区分模型列表覆盖地址和认证，升级时丢弃旧模型目录快照，并在下次读取后重建。缓存最多保留 256 个不同请求身份，30 天未更新的条目会清除；不会修改模型别名、供应商路由顺序、已选择模型或用户偏好。
+
+参考 yetone/magpie 公开模型目录的过期缓存刷新、失败后保留已有目录和缓存身份设计：[后台刷新与失败退避](https://github.com/yetone/magpie/blob/40118730018fe48db225f13ff56b8ec2f1d75fa4/internal/catalog/fresh.go)、[目录缓存身份](https://github.com/yetone/magpie/blob/2f1759c96c843a2e82c31c25ee5a976d5e7bdfd7/internal/catalog/cache_key.go)。YunSwitch 按本地供应商 API 重写，没有复制 Magpie 代码或资源。参考细节和许可边界见[来源记录](PROVENANCE.md)。
+
+本轮使用合成缓存数据与回环测试验证；没有真实供应商、个人密钥或付费 API 参与。仍需按真实供应商逐项验证模型列表端点的兼容性。
+
+本机 44 项模型目录/模型拉取相关 Rust 测试、4 项面板测试、TypeScript、Prettier、Rust 格式、严格 Clippy 和 renderer 构建通过。审查补充了按更新时间淘汰缓存的修复与逆序回归；接口测试覆盖后台刷新、密钥轮换和迟到响应保护。完整跨平台检查由 GitHub [源码 CI](https://github.com/yunhanhai/yunswitch/actions/runs/44981686760)确认，覆盖前端、Linux、macOS、Windows 与 Windows+WSL2。
+
+最终 Windows clean-runner [复验 `44983308745`](https://github.com/yunhanhai/yunswitch/actions/runs/44983308745)的 **106 项检查通过，0 项失败**。便携包与 `.7` 升级后的 MSI 均验证了 5 个并发首次读取只发出 1 个上游请求、5 个过期读取共用 1 次后台刷新、失败保留模型并遵守退避、v1 缓存重建、密钥和上游错误正文不进入缓存，以及真实 WebView 中的模型列表与安全错误提示。已回读两种形态的截图，确认首次配置提示未遮挡目录。
+
+包由[构建 `44981182793`](https://github.com/yunhanhai/yunswitch/actions/runs/44981182793)的源码 `f3169e59dbd906d9a106a7c9a9148a4db6b85da0` 生成，验收源码为 `26655f8f51b0f4e39a021b3d982b8fb4ccd6663f`；runner 对产品与许可证文件执行一致性检查，`package-provenance.json` 确认 `productSourcesUnchanged=true`。首次构建验收在升级后的设置页无法定位目录；之后只修改验收导航与首次提示处理，复用原 MSI/ZIP 完成上述复验。
+
+验收 MSI SHA-256：`26cd3aeaa5a420600ce8554ef2c7b9b12147882764aff46a19975e517116c535`；便携 ZIP SHA-256：`e0f21e008142879c353e6bf0219d13552da93e27e8f61b39ac19f7f9e31eabe2`。证据存于本机 `.git/model-catalog-accepted/`。这是保留公开 `.8` 版本号的临时 build-only 产物，不是新 Release；其他平台已通过源码 CI，尚未进行本功能的打包安装验收。

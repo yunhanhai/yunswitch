@@ -23,6 +23,8 @@ export interface ModelCatalogSnapshot {
   providerKey: string;
   models: CatalogModel[];
   vendorError: string | null;
+  lastAttemptAtSecs?: number;
+  refreshing?: boolean;
 }
 
 export interface ModelFetchOptions {
@@ -181,10 +183,20 @@ export async function refreshModelCatalog(
 /** 读取本地目录缓存状态（不触发网络请求）。 */
 export async function getModelCatalogCacheStatus(
   baseUrl: string,
+  apiKey: string,
+  isFullUrl?: boolean,
+  modelsUrl?: string,
+  customUserAgent?: string,
   apiFormat?: string,
+  requestHeaders?: Record<string, string>,
 ): Promise<ModelCatalogSnapshot | null> {
   return invoke("get_model_catalog_cache_status", {
     baseUrl,
+    apiKey,
+    isFullUrl,
+    modelsUrl,
+    customUserAgent,
     apiFormat: apiFormat || null,
+    requestHeaders,
   });
 }

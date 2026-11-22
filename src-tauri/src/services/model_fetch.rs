@@ -35,9 +35,6 @@ const MAX_REQUEST_HEADERS: usize = 64;
 const MAX_HEADER_NAME_BYTES: usize = 256;
 const MAX_HEADER_VALUE_BYTES: usize = 16 * 1024;
 
-/// 404/405 响应体截断长度：避免把几十 KB HTML 404 页整页保留到错误串里。
-const ERROR_BODY_MAX_CHARS: usize = 512;
-
 /// 已知的「Anthropic 协议兼容子路径」后缀；按长度降序，最长前缀优先匹配。
 /// baseURL 命中这些后缀时，候选列表会追加「剥离后缀再拼 /v1/models / /models」的版本。
 const KNOWN_COMPAT_SUFFIXES: &[&str] = &[
@@ -64,20 +61,40 @@ pub async fn fetch_models(
     api_format: Option<&str>,
     request_headers: Option<&BTreeMap<String, String>>,
 ) -> Result<Vec<FetchedModel>, String> {
+    fetch_models_with_client(
+        crate::proxy::http_client::get(),
+        base_url,
+        api_key,
+        is_full_url,
+        models_url_override,
+        user_agent,
+        api_format,
+        request_headers,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)] // Test seam injects an isolated loopback client.
+async fn fetch_models_with_client(
+    client: reqwest::Client,
+    base_url: &str,
+    api_key: &str,
+    is_full_url: bool,
+    models_url_override: Option<&str>,
+    user_agent: Option<HeaderValue>,
+    api_format: Option<&str>,
+    request_headers: Option<&BTreeMap<String, String>>,
+) -> Result<Vec<FetchedModel>, String> {
     let candidates = build_models_url_candidates(base_url, is_full_url, models_url_override)?;
     let headers =
         build_model_fetch_headers(api_key, api_format, user_agent.as_ref(), request_headers)?;
-    let client = crate::proxy::http_client::get();
     let mut last_err: Option<String> = None;
-    let mut known_secrets = vec![api_key.to_string()];
-    if let Some(request_headers) = request_headers {
-        known_secrets.extend(request_headers.values().cloned());
-    }
-
     for url in &candidates {
+        // Keep endpoint paths out of logs: custom endpoints may embed opaque
+        // credentials in their path, which are not discoverable from headers.
         log::debug!(
-            "[ModelFetch] Trying endpoint: {}",
-            crate::url_for_log_with_secrets(url, &known_secrets)
+            "[ModelFetch] Trying endpoint at: {}",
+            crate::redact_url_origin_for_log(url)
         );
         let request = client
             .get(url)
@@ -86,7 +103,17 @@ pub async fn fetch_models(
         let response = match request.send().await {
             Ok(r) => r,
             Err(e) => {
-                return Err(format!("Request failed: {e}"));
+                // reqwest's Display output may include the complete request
+                // URL. Keep user-visible and persisted catalog errors to a
+                // safe transport category instead of echoing endpoint data.
+                let reason = if e.is_timeout() {
+                    "timeout"
+                } else if e.is_connect() {
+                    "connection error"
+                } else {
+                    "transport error"
+                };
+                return Err(format!("Request failed: {reason}"));
             }
         };
 
@@ -96,7 +123,7 @@ pub async fn fetch_models(
             let resp: ModelsResponse = response
                 .json()
                 .await
-                .map_err(|e| format!("Failed to parse response: {e}"))?;
+                .map_err(|_| "Failed to parse response".to_string())?;
 
             let mut models: Vec<FetchedModel> = resp
                 .data
@@ -113,29 +140,20 @@ pub async fn fetch_models(
         }
 
         if status == StatusCode::NOT_FOUND || status == StatusCode::METHOD_NOT_ALLOWED {
-            let body = redact_model_fetch_error_body(
-                response.text().await.unwrap_or_default(),
-                &known_secrets,
-            );
-            last_err = Some(format!("HTTP {status}: {body}"));
+            // Upstream error bodies are untrusted and may echo private request
+            // data. The status is enough to select the next endpoint or show
+            // a useful recovery action in the UI.
+            last_err = Some(format!("HTTP {status}"));
             continue;
         }
 
-        let body = redact_model_fetch_error_body(
-            response.text().await.unwrap_or_default(),
-            &known_secrets,
-        );
-        return Err(format!("HTTP {status}: {body}"));
+        return Err(format!("HTTP {status}"));
     }
 
     Err(format!(
         "All candidates failed: {}",
         last_err.unwrap_or_else(|| "no candidates".to_string())
     ))
-}
-
-fn redact_model_fetch_error_body(body: String, known_secrets: &[String]) -> String {
-    truncate_body(crate::redact_known_secrets_strict(&body, known_secrets))
 }
 
 fn build_model_fetch_headers(
@@ -276,17 +294,6 @@ pub fn build_models_url_candidates(
     Ok(unique)
 }
 
-/// 截断响应体到 [`ERROR_BODY_MAX_CHARS`] 字符，避免 HTML 404 页占用错误串。
-fn truncate_body(body: String) -> String {
-    if body.chars().count() <= ERROR_BODY_MAX_CHARS {
-        body
-    } else {
-        let mut s: String = body.chars().take(ERROR_BODY_MAX_CHARS).collect();
-        s.push('…');
-        s
-    }
-}
-
 /// 若 baseURL 以任一已知兼容子路径结尾，返回剥离后的剩余部分；否则 `None`。
 ///
 /// 依赖 [`KNOWN_COMPAT_SUFFIXES`] 按长度降序排列，确保最长前缀优先命中
@@ -312,6 +319,25 @@ fn ends_with_version_segment(url: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+
+    fn spawn_once_response(status: &str, body: &str) -> (String, std::thread::JoinHandle<()>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let address = listener.local_addr().expect("loopback address");
+        let response = format!(
+            "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let thread = std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut request = [0_u8; 4096];
+                let _ = stream.read(&mut request);
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.flush();
+            }
+        });
+        (format!("http://{address}"), thread)
+    }
 
     #[test]
     fn model_fetch_headers_follow_pi_api_format() {
@@ -362,17 +388,39 @@ mod tests {
         assert!(build_model_fetch_headers("", None, None, Some(&invalid)).is_err());
     }
 
-    #[test]
-    fn model_fetch_error_body_redacts_known_header_credentials() {
-        let secrets = vec![
-            "short".to_string(),
-            "Bearer literal-header-secret".to_string(),
-        ];
-        let body = redact_model_fetch_error_body(
-            "invalid short / Bearer literal-header-secret".to_string(),
-            &secrets,
-        );
-        assert_eq!(body, "invalid [REDACTED] / [REDACTED]");
+    #[tokio::test]
+    async fn upstream_error_body_and_url_credentials_are_not_returned() {
+        let body = r#"{"error":"Bearer synthetic-fake-key private-response-body"}"#;
+        let (origin, server) = spawn_once_response("401 Unauthorized", body);
+        let models_url = format!("{origin}/models?token=synthetic-url-token");
+
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .expect("loopback HTTP client");
+        let error = fetch_models_with_client(
+            client,
+            &origin,
+            "synthetic-fake-key",
+            false,
+            Some(&models_url),
+            None,
+            Some("openai-responses"),
+            None,
+        )
+        .await
+        .expect_err("401 should be returned as a safe error");
+        server.join().expect("loopback response thread");
+
+        assert_eq!(error, "HTTP 401 Unauthorized");
+        for private_value in [
+            "synthetic-fake-key",
+            "synthetic-url-token",
+            "private-response-body",
+            "Bearer",
+        ] {
+            assert!(!error.contains(private_value));
+        }
     }
 
     #[test]

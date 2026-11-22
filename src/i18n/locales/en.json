@@ -218,7 +218,9 @@
       "clearFilter": "Clear filter",
       "emptyHint": "Not loaded yet — click Load to fetch models",
       "emptyWithError": "Fetch failed — no models available",
-      "filterEmpty": "No matching models — adjust your filter"
+      "filterEmpty": "No matching models — adjust your filter",
+      "refreshing": "Refreshing the model catalog in the background. Cached models remain available.",
+      "errorPrivacyHint": "For privacy, only the error category and HTTP status are shown; upstream error bodies are not saved."
     },
     "sortBy": "Sort by",
     "sortManual": "Manual order",

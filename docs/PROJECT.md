@@ -42,6 +42,8 @@
 
 `.8` 发布后的诊断源码已通过 [CI 与 Windows build-only 安装验收](REQUEST-DIAGNOSTICS-ACCEPTANCE.md)，可在桌面路由设置中查看请求状态。公开 `.8` 附件和版本标识未变；新诊断源码尚未作为新版本发布。
 
+模型目录缓存按真实请求身份区分，持久化键只保存哈希；目录过期后先保留可用数据并在后台单飞刷新。说明、[源码 CI](https://github.com/yunhanhai/yunswitch/actions/runs/44981686760)与 [106 项 Windows build-only 验收](https://github.com/yunhanhai/yunswitch/actions/runs/44983308745)见[模型目录缓存](MODEL-CATALOG.md)。这项优化尚未进入公开安装包。
+
 已公开的 `3.20.1-yunswitch.2` Windows x64 安装版与免安装版见 [GitHub](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.2) 和 [Gitee](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.2)，其安装与首版升级验收通过。文件校验与运行记录见[`.2` 发布记录](releases/3.20.1-yunswitch.2.md)。
 
 首个独立预发布 `3.20.1-yunswitch.1` 的 Windows x64 安装版与免安装版已在 Gitee、GitHub 同步公开，其他平台尚未发布。上游基线仍为 v3.20.1。已公开包的校验与验收记录见[首版记录](releases/3.20.1-yunswitch.1.md)。

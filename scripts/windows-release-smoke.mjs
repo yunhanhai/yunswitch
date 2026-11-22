@@ -471,6 +471,282 @@ async function exerciseProxy(cdp) {
   mock = undefined;
 }
 
+async function exerciseModelCatalog(cdp, label) {
+  const requests = [];
+  let responseMode = "initial";
+  const catalogServer = createServer((request, response) => {
+    requests.push({
+      path: request.url,
+      authorization: request.headers.authorization,
+    });
+    if (responseMode === "failure") {
+      setTimeout(() => {
+        response.writeHead(502, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            error: "synthetic-private-upstream-error",
+            credential: "fake-model-catalog-secret",
+          }),
+        );
+      }, 500);
+      return;
+    }
+    const modelId =
+      responseMode === "initial" ? "synthetic-model-v1" : "synthetic-model-v2";
+    const send = () => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({ data: [{ id: modelId, owned_by: "synthetic" }] }),
+      );
+    };
+    if (responseMode === "refresh-success") setTimeout(send, 700);
+    else if (responseMode === "initial") setTimeout(send, 500);
+    else send();
+  });
+  await new Promise((done) => catalogServer.listen(0, "127.0.0.1", done));
+  const endpoint = `http://127.0.0.1:${catalogServer.address().port}/v1`;
+  const params = {
+    baseUrl: endpoint,
+    apiKey: "fake-model-catalog-secret",
+    isFullUrl: false,
+    apiFormat: "anthropic",
+  };
+  const cachePath = join(
+    process.env.USERPROFILE,
+    ".yunswitch",
+    "model-catalog.json",
+  );
+  let providerKey;
+  const expireCache = async () => {
+    const cache = JSON.parse(await readFile(cachePath, "utf8"));
+    const snapshot = cache.snapshots[providerKey];
+    assert.ok(snapshot, "model catalog snapshot exists before expiry");
+    snapshot.fetchedAtSecs = 0;
+    snapshot.lastAttemptAtSecs = 0;
+    snapshot.vendorError = null;
+    await writeFile(cachePath, `${JSON.stringify(cache, null, 2)}\n`);
+  };
+  const cacheStatus = () =>
+    cdp.invoke("get_model_catalog_cache_status", params);
+  const openCatalog = async () => {
+    await until(
+      () =>
+        cdp.evaluate(`(() => {
+        if (document.getElementById('baseUrl')) return true;
+        const button = [...document.querySelectorAll('button[title]')]
+          .find(item => /^(Add New Provider|添加供应商)$/.test(item.title));
+        if (!button) {
+          document.querySelector('button:has(svg.lucide-arrow-left)')?.click();
+          return false;
+        }
+        document.querySelector('button[title="Claude Code"]')?.click();
+        button.click();
+        return false;
+      })()`),
+      "open provider form for model catalog",
+    );
+    await until(
+      () =>
+        cdp.evaluate(`(() => {
+        const notice = [...document.querySelectorAll('[role="dialog"]')]
+          .find(item => /About Common Config|关于通用配置/.test(item.innerText));
+        if (!notice) return true;
+        const confirm = [...notice.querySelectorAll('button')]
+          .find(item => /^(Got it|我知道了)$/.test(item.innerText.trim()));
+        confirm?.click();
+        return false;
+      })()`),
+      "dismiss the common configuration notice before catalog checks",
+    );
+    await cdp.evaluate(`(() => {
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      for (const [id, value] of ${JSON.stringify([
+        ["baseUrl", endpoint],
+        ["apiKey", params.apiKey],
+      ])}) {
+        const input = document.getElementById(id);
+        if (!input) throw new Error('Missing catalog form input: ' + id);
+        set.call(input, value);
+        input.dispatchEvent(new Event('input', {bubbles: true}));
+      }
+    })()`);
+    await until(
+      () =>
+        cdp.evaluate(`(() => {
+        const heading = [...document.querySelectorAll('span')]
+          .find(item => /^(Model catalog|模型目录)$/.test(item.textContent));
+        if (!heading) return false;
+        if (document.querySelector('[role="dialog"]')) return false;
+        heading.parentElement.parentElement.scrollIntoView({block: 'center'});
+        return heading.parentElement.parentElement.innerText.includes('synthetic-model');
+      })()`),
+      "render cached model catalog in provider form",
+    );
+  };
+  const closeCatalog = async () => {
+    await cdp.evaluate(`(() => {
+      const form = document.getElementById('baseUrl');
+      form?.blur();
+      window.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
+    })()`);
+    await until(
+      () => cdp.evaluate("!document.getElementById('baseUrl')"),
+      "close provider form without saving",
+    );
+  };
+
+  try {
+    const initialBurst = await Promise.all(
+      Array.from({ length: 5 }, () => cdp.invoke("get_model_catalog", params)),
+    );
+    const initial = initialBurst[0];
+    assert.ok(
+      initial.models.some((model) => model.id === "synthetic-model-v1"),
+    );
+    assert.ok(
+      initialBurst.every(
+        (snapshot) => snapshot.providerKey === initial.providerKey,
+      ),
+    );
+    providerKey = initial.providerKey;
+    assert.match(providerKey, /^v2-[0-9a-f]{64}$/);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].path, "/v1/models");
+    assert.equal(requests[0].authorization, "Bearer fake-model-catalog-secret");
+    check(
+      `${label} concurrent initial model loads share one hashed request identity`,
+      {
+        concurrentReads: initialBurst.length,
+        upstreamRequests: requests.length,
+      },
+    );
+    await openCatalog();
+    await cdp.screenshot(`${label.replaceAll(" ", "-")}-model-catalog.png`);
+    await closeCatalog();
+
+    responseMode = "refresh-success";
+    await expireCache();
+    const concurrent = await Promise.all(
+      Array.from({ length: 5 }, () => cdp.invoke("get_model_catalog", params)),
+    );
+    assert.ok(concurrent.every((snapshot) => snapshot.refreshing));
+    assert.ok(
+      concurrent.every((snapshot) =>
+        snapshot.models.some((model) => model.id === "synthetic-model-v1"),
+      ),
+    );
+    const refreshed = await until(async () => {
+      const status = await cacheStatus();
+      return !status?.refreshing &&
+        status?.models?.some((model) => model.id === "synthetic-model-v2")
+        ? status
+        : null;
+    }, "background model catalog refresh");
+    assert.equal(
+      requests.length,
+      2,
+      "concurrent stale reads share one upstream fetch",
+    );
+    assert.equal(refreshed.vendorError, null);
+    check(
+      `${label} stale model catalog remains available during one background refresh`,
+      {
+        concurrentReads: concurrent.length,
+        upstreamRequests: requests.length,
+      },
+    );
+
+    responseMode = "failure";
+    await expireCache();
+    const stale = await cdp.invoke("get_model_catalog", params);
+    assert.equal(stale.refreshing, true);
+    const failed = await until(async () => {
+      const status = await cacheStatus();
+      return !status?.refreshing && status?.vendorError ? status : null;
+    }, "failed catalog refresh state");
+    assert.equal(failed.vendorError, "HTTP 502 Bad Gateway");
+    assert.ok(failed.models.some((model) => model.id === "synthetic-model-v2"));
+    await cdp.invoke("get_model_catalog", params);
+    assert.equal(
+      requests.length,
+      3,
+      "failed refresh observes the retry backoff",
+    );
+    const cacheText = await readFile(cachePath, "utf8");
+    for (const privateValue of [
+      "fake-model-catalog-secret",
+      "synthetic-private-upstream-error",
+      "Bearer",
+    ]) {
+      assert.ok(
+        !cacheText.includes(privateValue),
+        `catalog cache excludes ${privateValue}`,
+      );
+      assert.ok(!failed.vendorError.includes(privateValue));
+    }
+    assert.equal(requests.length, 3);
+    check(
+      `${label} failed catalog refresh retains models and excludes credentials and upstream body`,
+    );
+    await openCatalog();
+    await until(
+      () =>
+        cdp.evaluate(
+          "document.body.innerText.includes('HTTP 502 Bad Gateway')",
+        ),
+      "render safe catalog refresh error",
+    );
+    await cdp.screenshot(
+      `${label.replaceAll(" ", "-")}-model-catalog-error.png`,
+    );
+    await closeCatalog();
+    assert.equal(
+      requests.length,
+      3,
+      "opening the UI respects the error retry backoff",
+    );
+    check(
+      `${label} model catalog UI shows cached models and the safe refresh error`,
+    );
+
+    const legacy = {
+      version: 1,
+      snapshots: {
+        [endpoint]: {
+          version: 1,
+          fetchedAtSecs: 1,
+          providerKey: endpoint,
+          models: [
+            {
+              id: "legacy-unsafe-model",
+              displayName: "Legacy",
+              source: "vendor",
+            },
+          ],
+          vendorError: null,
+        },
+      },
+    };
+    await writeFile(cachePath, `${JSON.stringify(legacy, null, 2)}\n`);
+    responseMode = "initial";
+    const migrated = await cdp.invoke("get_model_catalog", params);
+    assert.ok(
+      migrated.models.some((model) => model.id === "synthetic-model-v1"),
+    );
+    assert.equal(
+      requests.length,
+      4,
+      "legacy cache is discarded and fetched again",
+    );
+    const migratedCache = await readFile(cachePath, "utf8");
+    assert.ok(!migratedCache.includes(endpoint));
+    assert.ok(!migratedCache.includes("fake-model-catalog-secret"));
+    check(`${label} legacy model catalog cache is safely rebuilt`);
+  } finally {
+    await new Promise((done) => catalogServer.close(done));
+  }
+}
+
 async function exerciseMigration(cdp) {
   const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
   const source = await readFile(
@@ -696,6 +972,7 @@ async function verifyUpgrade(previous, current, installedExe, portableExe) {
     );
   }
   await verifySingleInstance(installedExe);
+  await exerciseModelCatalog(cdp, "upgraded MSI");
   await exerciseCodexCompatibility(cdp, {
     check,
     until,
@@ -874,6 +1151,7 @@ async function main() {
   );
   check("first-run UI renders and its confirmation persists");
   await exerciseProxy(cdp);
+  await exerciseModelCatalog(cdp, "portable");
   await exerciseCodexCompatibility(cdp, { check, until, label: "portable" });
   await exitApp();
   // A fresh installation may create tool directories. They must remain inside
