@@ -430,7 +430,6 @@ function ProviderFormFull({
     setCodexChatReasoning(initialData?.meta?.codexChatReasoning ?? {});
     setPromptCacheRouting(initialData?.meta?.promptCacheRouting ?? "auto");
     setCustomUserAgent(initialData?.meta?.customUserAgent ?? "");
-    setRequestBudget(requestBudgetDraft(initialData?.meta?.requestBudget));
     setLocalProxyHeadersOverride(
       formatRequestOverrideObject(
         initialData?.meta?.localProxyRequestOverrides?.headers,
@@ -630,6 +629,20 @@ function ProviderFormFull({
   const [requestBudget, setRequestBudget] = useState(() =>
     requestBudgetDraft(initialData?.meta?.requestBudget),
   );
+  const savedRequestBudget = initialData?.meta?.requestBudget;
+  useEffect(() => {
+    setRequestBudget(requestBudgetDraft(savedRequestBudget));
+    // Loading live settings replaces initialData without changing these local
+    // metadata values. It must not overwrite a budget the user is editing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    appId,
+    providerId,
+    savedRequestBudget?.firstByteTimeoutSecs,
+    savedRequestBudget?.idleTimeoutSecs,
+    savedRequestBudget?.nonStreamingTimeoutSecs,
+    savedRequestBudget?.recoveryTimeoutSecs,
+  ]);
   const [customUserAgent, setCustomUserAgent] = useState<string>(
     () => initialData?.meta?.customUserAgent ?? "",
   );

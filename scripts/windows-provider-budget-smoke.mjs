@@ -172,6 +172,13 @@ export async function exerciseProviderBudgets(cdp, { check, until, label }) {
     await cdp.evaluate(
       "document.querySelector('[data-request-budget=\"recoveryTimeoutSecs\"]').blur()",
     );
+    await until(
+      () =>
+        cdp.evaluate(
+          "document.querySelector('[data-request-budget=\"recoveryTimeoutSecs\"]')?.value === '3'",
+        ),
+      "retain edited budget after blur",
+    );
     await cdp.screenshot(
       `${label.replaceAll(" ", "-")}-provider-request-budget.png`,
     );
