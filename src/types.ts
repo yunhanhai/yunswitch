@@ -171,6 +171,13 @@ export interface LocalProxyRequestOverrides {
   body?: Record<string, unknown>;
 }
 
+export interface ProviderRequestBudget {
+  firstByteTimeoutSecs?: number;
+  idleTimeoutSecs?: number;
+  nonStreamingTimeoutSecs?: number;
+  recoveryTimeoutSecs?: number;
+}
+
 // 供应商元数据（字段名与后端一致，保持 snake_case）
 export interface ProviderMeta {
   // 自定义端点：以 URL 为键，值为端点信息
@@ -230,6 +237,8 @@ export interface ProviderMeta {
   customUserAgent?: string;
   // Local proxy request overrides. Only applied by the local proxy after route transforms.
   localProxyRequestOverrides?: LocalProxyRequestOverrides;
+  // Local proxy only. Missing fields retain the application's existing policy.
+  requestBudget?: ProviderRequestBudget;
   // Whether this provider is currently projected into an additive app's live config.
   liveConfigManaged?: boolean;
   // 供应商类型（用于识别 Copilot 等特殊供应商）

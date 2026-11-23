@@ -53,6 +53,10 @@ function StepFacts({ step }: { step: RequestStep }) {
   const format = (ms: number) => duration(ms, i18n.language);
   const facts = [
     step.reason && t(`${key}.reasons.${step.reason}`),
+    step.recoveryBudgetRemainingMs !== undefined &&
+      t(`${key}.recoveryBudgetRemaining`, {
+        time: format(step.recoveryBudgetRemainingMs),
+      }),
     step.plannedWaitMs !== undefined &&
       t(`${key}.planned`, { time: format(step.plannedWaitMs) }),
     step.waitLimitMs !== undefined &&

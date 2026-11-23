@@ -3141,8 +3141,10 @@
         "responseInterrupted": "Response interrupted",
         "incomplete": "Response incomplete",
         "recoveryWaitLimit": "Recovery wait exceeds the configured limit",
-        "internal": "Local proxy error"
-      }
+        "internal": "Local proxy error",
+        "recoveryBudget": "Budget before output exhausted"
+      },
+      "recoveryBudgetRemaining": "Budget before output remaining: {{time}}"
     },
     "resilience": {
       "todayFailovers": "Failovers today",
@@ -3519,5 +3521,20 @@
     "noSuggestions": "Nothing to merge (a model name must appear on 2+ channels)",
     "suggestionsTitle": "{{count}} mergeable model group(s) found",
     "adopt": "Adopt"
+  },
+  "providerBudget": {
+    "title": "Local proxy request budgets",
+    "description": "Leave blank to keep the app’s existing policy. Values override this provider for new requests through the local proxy, including when failover is off.",
+    "inherit": "Use app policy",
+    "firstByteTimeoutSecs": "First byte budget (seconds)",
+    "firstByteTimeoutSecsHint": "Maximum time to receive the upstream response and its initial data.",
+    "idleTimeoutSecs": "Stream idle budget (seconds)",
+    "idleTimeoutSecsHint": "Maximum gap without data after output starts.",
+    "nonStreamingTimeoutSecs": "Non-streaming budget (seconds)",
+    "nonStreamingTimeoutSecsHint": "Maximum time for one attempt to send and read the complete response body.",
+    "recoveryTimeoutSecs": "Budget before output (seconds)",
+    "recoveryTimeoutSecsHint": "Starts with the first attempt and includes sends, cooldown, queueing and retries. Failover never resets it; ongoing output is not cut off by this deadline.",
+    "range": "Use whole seconds from 1 to 3600. Clear a field to inherit. Retry counts and upstream cooldowns stay in force.",
+    "invalid": "Request budgets must be whole seconds from 1 to 3600, or blank to keep the existing policy."
   }
 }

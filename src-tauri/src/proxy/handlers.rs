@@ -2077,6 +2077,7 @@ fn codex_proxy_error_code(error: &ProxyError) -> &'static str {
     match error {
         ProxyError::ForwardFailed(_) => "cc_switch_forward_failed",
         ProxyError::Timeout(_) | ProxyError::StreamIdleTimeout(_) => "cc_switch_timeout",
+        ProxyError::RecoveryBudgetExceeded => "yunswitch_recovery_budget_exhausted",
         ProxyError::NoAvailableProvider => "cc_switch_no_available_provider",
         ProxyError::AllProvidersCircuitOpen => "cc_switch_all_providers_circuit_open",
         ProxyError::NoProvidersConfigured => "cc_switch_no_providers_configured",

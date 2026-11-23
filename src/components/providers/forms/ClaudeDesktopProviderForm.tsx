@@ -3,6 +3,11 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { ProviderRequestBudgetFields } from "./ProviderRequestBudgetFields";
+import {
+  parseRequestBudget,
+  requestBudgetDraft,
+} from "@/utils/providerRequestBudget";
 import { Download, Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -249,6 +254,9 @@ export function ClaudeDesktopProviderForm({
   onManageAuthAccounts,
 }: ClaudeDesktopProviderFormProps) {
   const { t } = useTranslation();
+  const [requestBudget, setRequestBudget] = useState(() =>
+    requestBudgetDraft(initialData?.meta?.requestBudget),
+  );
   const initialMode = isOAuthProviderType(initialData?.meta?.providerType)
     ? "proxy"
     : (initialData?.meta?.claudeDesktopMode ?? "direct");
@@ -566,6 +574,11 @@ export function ClaudeDesktopProviderForm({
   };
 
   const handleSubmit = async (values: ProviderFormData) => {
+    const budget = parseRequestBudget(requestBudget);
+    if (budget.invalid) {
+      toast.error(t("providerBudget.invalid"));
+      return;
+    }
     if (!values.name.trim()) {
       toast.error(
         t("providerForm.fillSupplierName", {
@@ -773,6 +786,7 @@ export function ClaudeDesktopProviderForm({
 
     const meta: ProviderMeta = {
       ...(initialData?.meta ?? {}),
+      requestBudget: budget.value,
       claudeDesktopMode: effectiveMode,
       apiFormat:
         activeProviderType === "xai_oauth"
@@ -1306,6 +1320,13 @@ export function ClaudeDesktopProviderForm({
               )}
             />
           </>
+        )}
+
+        {!isOfficial && (
+          <ProviderRequestBudgetFields
+            value={requestBudget}
+            onChange={setRequestBudget}
+          />
         )}
 
         {showButtons && (

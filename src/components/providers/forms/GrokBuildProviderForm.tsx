@@ -2,6 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useTranslation } from "react-i18next";
+import { ProviderRequestBudgetFields } from "./ProviderRequestBudgetFields";
+import {
+  parseRequestBudget,
+  requestBudgetDraft,
+} from "@/utils/providerRequestBudget";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -78,6 +83,9 @@ export function GrokBuildProviderForm({
   showButtons = true,
 }: GrokBuildProviderFormProps) {
   const { t } = useTranslation();
+  const [requestBudget, setRequestBudget] = useState(() =>
+    requestBudgetDraft(initialData?.meta?.requestBudget),
+  );
   const isDarkMode = useDarkMode();
   const initialConfigText =
     typeof initialData?.settingsConfig?.config === "string"
@@ -301,6 +309,11 @@ export function GrokBuildProviderForm({
   };
 
   const handleSubmit = async (values: ProviderFormData) => {
+    const budget = parseRequestBudget(requestBudget);
+    if (budget.invalid) {
+      toast.error(t("providerBudget.invalid"));
+      return;
+    }
     const name = values.name.trim();
 
     // 官方条目：config 快照原样透传（新增时为空），不做自定义模型字段校验，
@@ -315,7 +328,7 @@ export function GrokBuildProviderForm({
         presetId: selectedPresetId ?? undefined,
         presetCategory: "official",
         isPartner: false,
-        meta: initialData?.meta,
+        meta: { ...initialData?.meta, requestBudget: budget.value },
       });
       return;
     }
@@ -384,6 +397,7 @@ export function GrokBuildProviderForm({
     delete initialMeta.custom_endpoints;
     const meta: ProviderMeta = {
       ...initialMeta,
+      requestBudget: budget.value,
       apiFormat,
       apiKeyField: anthropicAuthField,
       isFullUrl,
@@ -552,6 +566,11 @@ export function GrokBuildProviderForm({
               <FormMessage />
             </FormItem>
           )}
+        />
+
+        <ProviderRequestBudgetFields
+          value={requestBudget}
+          onChange={setRequestBudget}
         />
 
         {showButtons && (

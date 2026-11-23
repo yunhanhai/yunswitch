@@ -6365,6 +6365,15 @@ impl ProviderService {
     }
 
     fn validate_provider_settings(app_type: &AppType, provider: &Provider) -> Result<(), AppError> {
+        if let Some(budget) = provider
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.request_budget.as_ref())
+        {
+            budget
+                .validate()
+                .map_err(|message| AppError::Config(message.to_string()))?;
+        }
         match app_type {
             AppType::Claude => {
                 if !provider.settings_config.is_object() {

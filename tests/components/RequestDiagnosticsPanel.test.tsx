@@ -25,6 +25,7 @@ const cooling: RequestSummary = {
     offsetMs: 500,
     elapsedMs: 1000,
     plannedWaitMs: 5000,
+    recoveryBudgetRemainingMs: 8000,
     reason: "sharedCooldown",
     attempt: 1,
   },
@@ -78,6 +79,7 @@ describe("request diagnostics", () => {
     expect(section.getByText("等待 429 冷却")).toBeVisible();
     expect(section.getByText("排队等待恢复许可")).toBeVisible();
     expect(section.getByText(/计划等待/)).toBeVisible();
+    expect(section.getAllByText(/输出前预算剩余/).length).toBeGreaterThan(0);
     expect(section.getByText(/排队上限/)).toBeVisible();
     expect(section.getAllByText(/实际耗时/)).toHaveLength(2);
     expect(screen.getByText(/HTTP 429/)).toBeVisible();

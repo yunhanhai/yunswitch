@@ -31,6 +31,7 @@ export type RequestErrorClass =
   | "noProvider"
   | "network"
   | "timeout"
+  | "recoveryBudget"
   | "upstream"
   | "responseTooLarge"
   | "responseInterrupted"
@@ -48,6 +49,7 @@ export interface RequestStep {
   reason?: RequestReason;
   plannedWaitMs?: number;
   waitLimitMs?: number;
+  recoveryBudgetRemainingMs?: number;
   error?: { class: RequestErrorClass; httpStatus?: number };
 }
 
