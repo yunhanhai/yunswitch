@@ -220,7 +220,8 @@
       "emptyWithError": "拉取失敗，暫無可用模型",
       "filterEmpty": "無符合模型，請調整篩選條件",
       "refreshing": "正在背景更新模型目錄，目前仍可使用已快取的模型。",
-      "errorPrivacyHint": "為保護隱私，僅顯示錯誤類別和 HTTP 狀態，不會保存上游錯誤本文。"
+      "errorPrivacyHint": "為保護隱私，僅顯示錯誤類別和 HTTP 狀態，不會保存上游錯誤本文。",
+      "observationFailed": "無法讀取更新狀態，已保留快取模型。請點擊「重新整理」重試。"
     },
     "sortBy": "排序方式",
     "sortManual": "手動排序",

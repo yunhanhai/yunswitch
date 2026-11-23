@@ -17,6 +17,7 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import {
   getModelCatalog,
+  getModelCatalogCacheStatus,
   refreshModelCatalog,
   type CatalogModel,
   type ModelCatalogSnapshot,
@@ -30,6 +31,32 @@ async function modelFetchKeyFingerprint(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) =>
     byte.toString(16).padStart(2, "0"),
   ).join("");
+}
+
+function sameSnapshot(
+  previous: ModelCatalogSnapshot | null,
+  next: ModelCatalogSnapshot | null,
+): boolean {
+  if (previous === next) return true;
+  if (!previous || !next) return false;
+  return (
+    previous.version === next.version &&
+    previous.providerKey === next.providerKey &&
+    previous.fetchedAtSecs === next.fetchedAtSecs &&
+    previous.lastAttemptAtSecs === next.lastAttemptAtSecs &&
+    !!previous.refreshing === !!next.refreshing &&
+    previous.vendorError === next.vendorError &&
+    previous.models.length === next.models.length &&
+    previous.models.every((model, index) => {
+      const other = next.models[index];
+      return (
+        model.id === other.id &&
+        model.displayName === other.displayName &&
+        model.source === other.source &&
+        model.ownedBy === other.ownedBy
+      );
+    })
+  );
 }
 
 /** 轻量"仅显示可用模型"开关，供 ModelMappingEditor 复用。 */
@@ -163,19 +190,27 @@ export function ModelCatalogPanel({
   const [filter, setFilter] = useState("");
   const [showVendorOnly, setShowVendorOnly] = useState(false);
   const lastAutoFetchKeyRef = useRef<string | null>(null);
-  const credentialFingerprintRef = useRef<string | null>(null);
   const snapshotRef = useRef<ModelCatalogSnapshot | null>(null);
+  const onSnapshotChangeRef = useRef(onSnapshotChange);
+  useLayoutEffect(() => {
+    onSnapshotChangeRef.current = onSnapshotChange;
+  }, [onSnapshotChange]);
+  const publishSnapshot = useCallback((next: ModelCatalogSnapshot | null) => {
+    if (sameSnapshot(snapshotRef.current, next)) return;
+    snapshotRef.current = next;
+    setSnapshot(next);
+    onSnapshotChangeRef.current?.(next);
+  }, []);
   const requestGenerationRef = useRef(0);
   useLayoutEffect(() => {
     requestGenerationRef.current += 1;
+    lastAutoFetchKeyRef.current = null;
+    publishSnapshot(null);
     setLoading(false);
     return () => {
       requestGenerationRef.current += 1;
     };
-  }, [baseUrl, apiKey, isFullUrl, modelsUrl, apiFormat]);
-  useEffect(() => {
-    snapshotRef.current = snapshot;
-  }, [snapshot]);
+  }, [baseUrl, apiKey, isFullUrl, modelsUrl, apiFormat, publishSnapshot]);
 
   const filtered = useMemo(() => {
     const models: CatalogModel[] = snapshot?.models ?? [];
@@ -218,8 +253,7 @@ export function ModelCatalogPanel({
               { apiFormat },
             );
         if (requestGeneration !== requestGenerationRef.current) return null;
-        setSnapshot(data);
-        onSnapshotChange?.(data);
+        publishSnapshot(data);
         return data;
       } catch (e) {
         if (requestGeneration !== requestGenerationRef.current) return null;
@@ -233,8 +267,7 @@ export function ModelCatalogPanel({
               models: [],
               vendorError: String(e),
             };
-        setSnapshot(fallback);
-        onSnapshotChange?.(fallback);
+        publishSnapshot(fallback);
         return fallback;
       } finally {
         if (requestGeneration === requestGenerationRef.current) {
@@ -242,7 +275,7 @@ export function ModelCatalogPanel({
         }
       }
     },
-    [baseUrl, apiKey, isFullUrl, modelsUrl, apiFormat, onSnapshotChange],
+    [baseUrl, apiKey, isFullUrl, modelsUrl, apiFormat, publishSnapshot],
   );
 
   useEffect(() => {
@@ -250,35 +283,43 @@ export function ModelCatalogPanel({
     let cancelled = false;
     let timeout: number | undefined;
     const poll = async () => {
+      const generation = requestGenerationRef.current;
+      const isCurrent = () =>
+        !cancelled && generation === requestGenerationRef.current;
+      const schedule = () => {
+        if (!cancelled && snapshotRef.current?.refreshing) {
+          timeout = window.setTimeout(() => void poll(), 1200);
+        }
+      };
       try {
-        const next = await getModelCatalog(
+        const next = await getModelCatalogCacheStatus(
           baseUrl,
           apiKey,
           isFullUrl,
           modelsUrl,
           undefined,
-          {
-            apiFormat,
-          },
+          apiFormat,
         );
-        if (!cancelled) {
-          setSnapshot(next);
-          onSnapshotChange?.(next);
-          if (next.refreshing) {
-            timeout = window.setTimeout(() => void poll(), 1200);
-          }
+        if (!isCurrent()) {
+          schedule();
+          return;
         }
-      } catch (error) {
-        if (cancelled) return;
+        if (!next) throw new Error("Catalog cache unavailable");
+        publishSnapshot(next);
+        schedule();
+      } catch {
+        if (!isCurrent()) {
+          schedule();
+          return;
+        }
         const current = snapshotRef.current;
         if (current) {
           const failed = {
             ...current,
             refreshing: false,
-            vendorError: String(error),
+            vendorError: t("provider.modelCatalog.observationFailed"),
           };
-          setSnapshot(failed);
-          onSnapshotChange?.(failed);
+          publishSnapshot(failed);
         }
       }
     };
@@ -294,7 +335,8 @@ export function ModelCatalogPanel({
     isFullUrl,
     modelsUrl,
     apiFormat,
-    onSnapshotChange,
+    publishSnapshot,
+    t,
   ]);
 
   const fetchCatalog = useCallback(
@@ -323,39 +365,6 @@ export function ModelCatalogPanel({
     setFilter("");
     setShowVendorOnly(false);
   }, []);
-
-  useEffect(() => {
-    const key = apiKey.trim();
-    if (!key) {
-      if (credentialFingerprintRef.current !== null) {
-        credentialFingerprintRef.current = null;
-        lastAutoFetchKeyRef.current = null;
-        snapshotRef.current = null;
-        setSnapshot(null);
-        onSnapshotChange?.(null);
-      }
-      return;
-    }
-    let cancelled = false;
-    void modelFetchKeyFingerprint(key)
-      .then((fingerprint) => {
-        if (cancelled) return;
-        if (
-          credentialFingerprintRef.current !== null &&
-          credentialFingerprintRef.current !== fingerprint
-        ) {
-          lastAutoFetchKeyRef.current = null;
-          snapshotRef.current = null;
-          setSnapshot(null);
-          onSnapshotChange?.(null);
-        }
-        credentialFingerprintRef.current = fingerprint;
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [apiKey, onSnapshotChange]);
 
   // 单字段添加：预设已填好 baseUrl，粘贴 Key 后自动拉目录（防抖 600ms，同一 key 不重复触发）
   useEffect(() => {
@@ -388,14 +397,6 @@ export function ModelCatalogPanel({
       if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [autoFetch, baseUrl, apiKey, isFullUrl, modelsUrl, apiFormat, doFetch]);
-
-  // 切换预设/端点时重置自动拉取记忆，允许对新 baseUrl 再次自动拉取
-  useEffect(() => {
-    lastAutoFetchKeyRef.current = null;
-    setSnapshot(null);
-    onSnapshotChange?.(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseUrl, isFullUrl, modelsUrl, apiFormat]);
 
   const hasActiveFilter = filter.trim().length > 0 || showVendorOnly;
   const isEmptyFiltered =
@@ -483,7 +484,7 @@ export function ModelCatalogPanel({
               size="sm"
               className="h-7 text-xs"
               disabled={loading}
-              onClick={() => fetchCatalog(false)}
+              onClick={() => fetchCatalog(true)}
             >
               <RefreshCw
                 className={cn("mr-1 h-3 w-3", loading && "animate-spin")}

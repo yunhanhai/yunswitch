@@ -583,6 +583,21 @@ async function exerciseModelCatalog(cdp, label) {
       "render cached model catalog in provider form",
     );
   };
+  const clickCatalogAction = async (pattern) => {
+    assert.equal(
+      await cdp.evaluate(`(() => {
+        const heading = [...document.querySelectorAll('span')]
+          .find(item => /^(Model catalog|模型目录)$/.test(item.textContent));
+        const panel = heading?.parentElement.parentElement;
+        const button = [...(panel?.querySelectorAll('button') || [])]
+          .find(item => new RegExp(${JSON.stringify(pattern)}).test(item.innerText.trim()));
+        if (!button || button.disabled) return false;
+        button.click();
+        return true;
+      })()`),
+      true,
+    );
+  };
   const closeCatalog = async () => {
     await cdp.evaluate(`(() => {
       const form = document.getElementById('baseUrl');
@@ -709,6 +724,91 @@ async function exerciseModelCatalog(cdp, label) {
       `${label} model catalog UI shows cached models and the safe refresh error`,
     );
 
+    responseMode = "refresh-success";
+    await openCatalog();
+    await clickCatalogAction("^(Retry|重试)$");
+    await until(async () => {
+      const current = await cacheStatus();
+      return current && !current.refreshing && !current.vendorError;
+    }, "explicit catalog retry bypasses automatic backoff");
+    assert.equal(requests.length, 4);
+    await closeCatalog();
+    check(
+      `${label} explicit catalog retry refetches immediately during automatic backoff`,
+    );
+
+    await expireCache();
+    const stopped = await cdp.invoke("get_model_catalog", params);
+    assert.equal(stopped.refreshing, true);
+    await until(
+      async () => !(await cacheStatus())?.refreshing,
+      "finish refresh before observer-only check",
+    );
+    assert.equal(requests.length, 5);
+    // Tauri defines invoke as non-writable. Intercept only these IPC fetches;
+    // all other commands keep the real bridge and are restored in finally.
+    for (const failureMode of ["missing", "error"]) {
+      assert.equal(
+        await cdp.evaluate(`(() => {
+          const original = window.fetch;
+          const reply = (value, ok = true) => new Response(JSON.stringify(value), {
+            headers: {'Content-Type': 'application/json', 'Tauri-Response': ok ? 'ok' : 'error'},
+          });
+          window.__catalogObserverProbe = {original, reads: 0, loads: 0};
+          window.fetch = function(input, ...rest) {
+            const url = new URL(typeof input === 'string' ? input : input.url);
+            if (url.hostname === 'ipc.localhost') {
+              if (url.pathname === '/get_model_catalog') {
+                window.__catalogObserverProbe.loads += 1;
+                return Promise.resolve(reply(${JSON.stringify(stopped)}));
+              }
+              if (url.pathname === '/get_model_catalog_cache_status') {
+                window.__catalogObserverProbe.reads += 1;
+                return Promise.resolve(${JSON.stringify(failureMode)} === 'missing'
+                  ? reply(null)
+                  : reply('synthetic-private-observation-error', false));
+              }
+            }
+            return original.call(this, input, ...rest);
+          };
+          return window.fetch !== original;
+        })()`),
+        true,
+      );
+      try {
+        await openCatalog();
+        await until(
+          () =>
+            cdp.evaluate(
+              "document.body.innerText.includes('Refresh status could not be read') || document.body.innerText.includes('无法读取刷新状态')",
+            ),
+          "catalog observer safely reports unavailable local state",
+        );
+        const probe = await cdp.evaluate(
+          "({reads:window.__catalogObserverProbe.reads,loads:window.__catalogObserverProbe.loads,text:document.body.innerText})",
+        );
+        assert.equal(probe.loads, 1);
+        assert.equal(probe.reads, 1);
+        assert.ok(!probe.text.includes("synthetic-private-observation-error"));
+        await cdp.screenshot(
+          `${label.replaceAll(" ", "-")}-model-catalog-observer-${failureMode}.png`,
+        );
+        await closeCatalog();
+      } finally {
+        await cdp.evaluate(
+          "window.fetch = window.__catalogObserverProbe.original; delete window.__catalogObserverProbe;",
+        );
+      }
+    }
+    assert.equal(
+      requests.length,
+      5,
+      "observing unavailable state never sends another upstream request",
+    );
+    check(
+      `${label} catalog observes local state without network and retains models when cache is unavailable`,
+    );
+
     const legacy = {
       version: 1,
       snapshots: {
@@ -735,7 +835,7 @@ async function exerciseModelCatalog(cdp, label) {
     );
     assert.equal(
       requests.length,
-      4,
+      6,
       "legacy cache is discarded and fetched again",
     );
     const migratedCache = await readFile(cachePath, "utf8");
