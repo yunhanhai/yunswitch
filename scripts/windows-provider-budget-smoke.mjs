@@ -157,22 +157,45 @@ export async function exerciseProviderBudgets(cdp, { check, until, label }) {
     );
     await cdp.evaluate(`(() => {
       const input = document.querySelector('[data-request-budget="recoveryTimeoutSecs"]');
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'3');
-      input.dispatchEvent(new Event('input',{bubbles:true}));
+      input.focus();
+      input.select();
       input.scrollIntoView({block:'center'});
     })()`);
+    await cdp.send("Input.insertText", { text: "3" });
+    await until(
+      () =>
+        cdp.evaluate(
+          "document.querySelector('[data-request-budget=\"recoveryTimeoutSecs\"]')?.value === '3'",
+        ),
+      "enter budget through WebView keyboard input",
+    );
+    await cdp.evaluate(
+      "document.querySelector('[data-request-budget=\"recoveryTimeoutSecs\"]').blur()",
+    );
     await cdp.screenshot(
       `${label.replaceAll(" ", "-")}-provider-request-budget.png`,
     );
-    await cdp.evaluate(
-      'document.querySelector(\'button[type="submit"][form="provider-form"],form button[type="submit"]\')?.click()',
+    assert.equal(
+      await cdp.evaluate(`(() => {
+      const button=document.querySelector('button[type="submit"][form="provider-form"],form button[type="submit"]');
+      if(!button || button.disabled) return false;
+      button.click(); return true;
+    })()`),
+      true,
     );
-    await until(async () => {
-      const providers = await cdp.invoke("get_providers", { app: "claude" });
-      return (
-        providers[provider.id]?.meta?.requestBudget?.recoveryTimeoutSecs === 3
+    try {
+      await until(async () => {
+        const providers = await cdp.invoke("get_providers", { app: "claude" });
+        return (
+          providers[provider.id]?.meta?.requestBudget?.recoveryTimeoutSecs === 3
+        );
+      }, "persist budget changed in actual provider form");
+    } catch (error) {
+      await cdp.screenshot(
+        `${label.replaceAll(" ", "-")}-provider-budget-save-failed.png`,
       );
-    }, "persist budget changed in actual provider form");
+      throw error;
+    }
     await cdp.evaluate(
       "window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))",
     );
