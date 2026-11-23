@@ -29,6 +29,8 @@
 
 后续目录修复已使后台观察只读本地状态，避免父表单渲染推迟观察及相同快照重复通知；手动重试可立即绕过自动失败退避。本机面板与翻译测试、类型/格式、严格 Clippy 和 renderer 构建通过；[PR 源码 CI](https://github.com/yunhanhai/yunswitch/actions/runs/45121041047) 的 1110 项前端测试与[Windows 真包复验](https://github.com/yunhanhai/yunswitch/actions/runs/45121111332)的 110 项检查通过。未改动后端源码，PR 后端任务按路径跳过；新包来源、首次脚本失败与修正见[模型目录记录](MODEL-CATALOG.md)。公开 `.8` 包未更换。
 
+Responses shim 已按固定提交完成[优化对照](SHIM-OPTIMIZATION-REVIEW.md)和 7 个合成回环场景。建议后续分别评估供应商预算覆盖、输出后安全终态和明确启用的原生稳定缓存键；当前仅为评估，未引入产品。状态请求重放、取消后继续重试、正文覆盖鉴权分类及压缩上游等待等行为不移植。
+
 ## 每一阶段的实施方式
 
 1. 用明确场景说明缺口，先复现当前行为和应有结果。
