@@ -33,7 +33,9 @@ pub fn map_proxy_error_to_status(error: &ProxyError) -> u16 {
         ProxyError::RateLimited { .. } => 429,
 
         // 超时错误：504 Gateway Timeout
-        ProxyError::Timeout(_) | ProxyError::StreamIdleTimeout(_) => 504,
+        ProxyError::Timeout(_)
+        | ProxyError::StreamIdleTimeout(_)
+        | ProxyError::RecoveryBudgetExceeded => 504,
 
         // 转发失败/连接失败：502 Bad Gateway
         ProxyError::ForwardFailed(_) => 502,

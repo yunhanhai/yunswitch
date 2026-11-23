@@ -213,6 +213,7 @@ impl Drop for RateLimitWaitGuard {
     }
 }
 
+#[derive(Clone)]
 pub struct RequestForwarder {
     /// 共享的 ProviderRouter（持有熔断器状态）
     router: Arc<ProviderRouter>,
@@ -761,7 +762,7 @@ impl RequestForwarder {
         endpoint: &str,
         body: Value,
         headers: axum::http::HeaderMap,
-        extensions: Extensions,
+        mut extensions: Extensions,
         providers: Vec<Provider>,
     ) -> Result<ForwardResult, ForwardError> {
         let guard = ActiveConnectionGuard::acquire(self.status.clone()).await;
@@ -770,11 +771,34 @@ impl RequestForwarder {
             s.total_requests = s.total_requests.saturating_add(1);
             s.last_request_at = Some(chrono::Utc::now().to_rfc3339());
         }
-        let result = self
-            .forward_with_retry_inner(
+        let budget = super::request_budget::RecoveryBudget::new();
+        let trace = extensions.get::<RequestTrace>().cloned();
+        extensions.insert(budget.clone());
+        let result = match budget
+            .run(self.forward_with_retry_inner(
                 app_type, method, endpoint, body, headers, extensions, providers,
-            )
-            .await;
+            ))
+            .await
+        {
+            Ok(result) => result,
+            Err(error) => {
+                if let Some(trace) = &trace {
+                    trace.recovery_budget(Some(0));
+                    trace.note_error((&error).into());
+                }
+                let mut status = self.status.write().await;
+                status.failed_requests += 1;
+                status.last_error = Some(error.to_string());
+                if status.total_requests > 0 {
+                    status.success_rate =
+                        status.success_requests as f32 / status.total_requests as f32 * 100.0;
+                }
+                Err(ForwardError {
+                    error,
+                    provider: None,
+                })
+            }
+        };
         // 把 guard 注入到 Ok 结果，让它随响应一起流转到 response_processor，
         // 在流式 body 的 future 内才真正 drop。
         // Err 路径：guard 在函数 scope 内随返回值落地时自动 drop。
@@ -880,6 +904,10 @@ impl RequestForwarder {
 
             if !permit.allowed {
                 continue;
+            }
+
+            if let Some(budget) = extensions.get::<super::request_budget::RecoveryBudget>() {
+                budget.constrain(provider);
             }
 
             // The response guard alone cannot prevent retries on HTTP errors
@@ -1715,11 +1743,60 @@ impl RequestForwarder {
         extensions: &Extensions,
         adapter: &dyn ProviderAdapter,
     ) -> Result<(ProxyResponse, Option<String>, Option<String>), ProxyError> {
-        let result = self
-            .forward_once(
-                app_type, method, provider, endpoint, body, headers, extensions, adapter,
-            )
-            .await;
+        // Scope overrides to the actual provider, including rectifier retries.
+        // Never mutate the request's inherited policy when moving to a fallback.
+        let settings = super::request_budget::overrides(provider);
+        let recovery = extensions.get::<super::request_budget::RecoveryBudget>();
+        let remaining = recovery.and_then(|budget| budget.remaining_ms());
+        let scoped = if settings.is_some() || remaining.is_some() {
+            let mut scoped = self.clone();
+            if let Some(seconds) = settings
+                .and_then(|budget| super::request_budget::seconds(budget.first_byte_timeout_secs))
+            {
+                scoped.streaming_first_byte_timeout = Duration::from_secs(seconds);
+            }
+            if let Some(seconds) = settings.and_then(|budget| {
+                super::request_budget::seconds(budget.non_streaming_timeout_secs)
+            }) {
+                scoped.non_streaming_timeout = Duration::from_secs(seconds);
+            }
+            // An active recovery deadline covers full non-streaming delivery
+            // and at least one chunk, including unconfigured fallback providers.
+            if let Some(remaining) = remaining {
+                if scoped.non_streaming_timeout.is_zero() {
+                    scoped.non_streaming_timeout = Duration::from_millis(remaining.max(1));
+                }
+                if scoped.streaming_first_byte_timeout.is_zero() {
+                    scoped.streaming_first_byte_timeout = Duration::from_millis(remaining.max(1));
+                }
+            }
+            Some(scoped)
+        } else {
+            None
+        };
+        let forwarder = scoped.as_ref().unwrap_or(self);
+        let streaming = is_streaming_request(endpoint, body, headers);
+        let explicit_timeout = settings.and_then(|budget| {
+            super::request_budget::seconds(if streaming {
+                budget.first_byte_timeout_secs
+            } else {
+                budget.non_streaming_timeout_secs
+            })
+        });
+        let send = forwarder.forward_once(
+            app_type, method, provider, endpoint, body, headers, extensions, adapter,
+        );
+        let result = if let Some(seconds) = explicit_timeout {
+            tokio::time::timeout(Duration::from_secs(seconds), send)
+                .await
+                .unwrap_or_else(|_| {
+                    Err(ProxyError::Timeout(
+                        "Provider request budget exceeded".to_string(),
+                    ))
+                })
+        } else {
+            send.await
+        };
         if let (Err(error), Some(trace)) = (&result, extensions.get::<RequestTrace>()) {
             trace.note_error(error.into());
         }
@@ -1738,6 +1815,9 @@ impl RequestForwarder {
         extensions: &Extensions,
         adapter: &dyn ProviderAdapter,
     ) -> Result<(ProxyResponse, Option<String>, Option<String>), ProxyError> {
+        if let Some(budget) = extensions.get::<super::request_budget::RecoveryBudget>() {
+            budget.check()?;
+        }
         // 使用适配器提取 base_url
         let mut base_url = adapter.extract_base_url(provider)?;
 
@@ -3002,6 +3082,12 @@ impl RequestForwarder {
         // retries. A newer overlapping 429 must survive this attempt's success.
         let cooldown_epoch = self.router.cooldown_epoch();
         let trace = extensions.get::<RequestTrace>();
+        if let Some(budget) = extensions.get::<super::request_budget::RecoveryBudget>() {
+            budget.check()?;
+            if let Some(trace) = trace {
+                trace.recovery_budget(budget.remaining_ms());
+            }
+        }
 
         // 发送请求
         let response = if is_socks_proxy || !preserve_exact_header_case {
@@ -3061,7 +3147,17 @@ impl RequestForwarder {
                 ordered_headers,
                 extensions.clone(),
                 body_bytes,
-                timeout,
+                if request_is_streaming
+                    && super::request_budget::seconds(
+                        super::request_budget::overrides(provider)
+                            .and_then(|budget| budget.first_byte_timeout_secs),
+                    )
+                    .is_some()
+                {
+                    self.streaming_first_byte_timeout
+                } else {
+                    timeout
+                },
                 upstream_proxy_url.as_deref(),
             )
             .await?
@@ -4615,6 +4711,10 @@ fn value_for_log(value: &Value) -> String {
 }
 
 #[cfg(test)]
+#[path = "forwarder_budget_tests.rs"]
+mod request_budgets;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::database::Database;
@@ -4648,7 +4748,7 @@ mod tests {
         }
     }
 
-    fn test_forwarder(
+    pub(super) fn test_forwarder(
         non_streaming_timeout: Duration,
         streaming_first_byte_timeout: Duration,
     ) -> RequestForwarder {
@@ -5885,7 +5985,7 @@ mod tests {
         fwd
     }
 
-    fn codex_api_provider(id: &str, base: &str) -> Provider {
+    pub(super) fn codex_api_provider(id: &str, base: &str) -> Provider {
         Provider::with_id(
             id.to_string(),
             id.to_string(),
@@ -5936,7 +6036,7 @@ mod tests {
         ]})
     }
 
-    async fn send_codex(
+    pub(super) async fn send_codex(
         fwd: &RequestForwarder,
         body: Value,
         providers: Vec<Provider>,
@@ -7221,7 +7321,7 @@ mod tests {
 
     /// 本地 mock 上游：前 `failures` 次请求返回 503，之后返回 200。
     /// 返回上游地址与命中计数，用来断言实际发出了几次请求。
-    async fn spawn_flaky_upstream(
+    pub(super) async fn spawn_flaky_upstream(
         failures: usize,
     ) -> (String, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
         // 与 lib.rs 的 setup 一致：hyper 直连路径构建 TLS connector 时依赖进程级
@@ -7252,7 +7352,7 @@ mod tests {
         (format!("http://{addr}"), hits, handle)
     }
 
-    fn claude_provider_at(id: &str, base_url: &str) -> Provider {
+    pub(super) fn claude_provider_at(id: &str, base_url: &str) -> Provider {
         Provider::with_id(
             id.to_string(),
             id.to_string(),
@@ -7264,7 +7364,7 @@ mod tests {
         )
     }
 
-    async fn send_messages(
+    pub(super) async fn send_messages(
         fwd: &RequestForwarder,
         providers: Vec<Provider>,
     ) -> Result<ForwardResult, ForwardError> {

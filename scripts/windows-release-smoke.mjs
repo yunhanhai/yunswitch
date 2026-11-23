@@ -10,6 +10,7 @@ import { mkdir, readFile, writeFile, stat, cp } from "node:fs/promises";
 import { resolve, join, relative, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { exerciseCodexCompatibility } from "./windows-codex-compat-smoke.mjs";
+import { exerciseProviderBudgets } from "./windows-provider-budget-smoke.mjs";
 
 const execFileAsync = promisify(execFile);
 const args = Object.fromEntries(
@@ -1073,6 +1074,7 @@ async function verifyUpgrade(previous, current, installedExe, portableExe) {
   }
   await verifySingleInstance(installedExe);
   await exerciseModelCatalog(cdp, "upgraded MSI");
+  await exerciseProviderBudgets(cdp, { check, until, label: "upgraded MSI" });
   await exerciseCodexCompatibility(cdp, {
     check,
     until,
@@ -1252,6 +1254,7 @@ async function main() {
   check("first-run UI renders and its confirmation persists");
   await exerciseProxy(cdp);
   await exerciseModelCatalog(cdp, "portable");
+  await exerciseProviderBudgets(cdp, { check, until, label: "portable" });
   await exerciseCodexCompatibility(cdp, { check, until, label: "portable" });
   await exitApp();
   // A fresh installation may create tool directories. They must remain inside

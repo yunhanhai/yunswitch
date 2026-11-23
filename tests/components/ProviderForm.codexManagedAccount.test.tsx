@@ -6,6 +6,8 @@ import {
   type ProviderFormValues,
 } from "@/components/providers/forms/ProviderForm";
 import { createTestQueryClient } from "../utils/testQueryClient";
+import i18n from "i18next";
+import zh from "@/i18n/locales/zh.json";
 
 const authState = vi.hoisted(() => ({
   codexReauthRequired: false,
@@ -192,8 +194,80 @@ function renderClaudeCodexForm(onSubmit: (values: ProviderFormValues) => void) {
 
 describe("ProviderForm Codex Official managed account", () => {
   beforeEach(() => {
+    i18n.addResourceBundle("zh", "translation", {
+      providerBudget: zh.providerBudget,
+    });
     authState.codexReauthRequired = false;
     toastMocks.error.mockReset();
+  });
+
+  it("saves only explicit local proxy budgets with an official provider", async () => {
+    const onSubmit = vi.fn();
+    renderCodexForm(onSubmit);
+    fireEvent.click(screen.getByRole("button", { name: /OpenAI Official/ }));
+    fireEvent.click(
+      screen.getByRole("button", { name: zh.providerBudget.title }),
+    );
+    fireEvent.change(
+      screen.getByLabelText(zh.providerBudget.firstByteTimeoutSecs),
+      { target: { value: "45" } },
+    );
+    fireEvent.change(
+      screen.getByLabelText(zh.providerBudget.recoveryTimeoutSecs),
+      { target: { value: "90" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "save-provider" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0].meta.requestBudget).toEqual({
+      firstByteTimeoutSecs: 45,
+      recoveryTimeoutSecs: 90,
+    });
+    expect(
+      JSON.parse(onSubmit.mock.calls[0][0].settingsConfig),
+    ).not.toHaveProperty("requestBudget");
+  });
+
+  it("keeps a budget draft when asynchronous live settings replace initialData", async () => {
+    const queryClient = createTestQueryClient();
+    const onSubmit = vi.fn();
+    const initialData = {
+      name: "OpenAI Official",
+      category: "official" as const,
+      settingsConfig: { auth: {}, config: "" },
+      meta: { requestBudget: { recoveryTimeoutSecs: 2 } },
+    };
+    const view = (data: typeof initialData) => (
+      <QueryClientProvider client={queryClient}>
+        <ProviderForm
+          appId="codex"
+          providerId="synthetic-budget"
+          submitLabel="save-provider"
+          onSubmit={onSubmit}
+          onCancel={vi.fn()}
+          initialData={data}
+        />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(view(initialData));
+    fireEvent.change(
+      screen.getByLabelText(zh.providerBudget.recoveryTimeoutSecs),
+      { target: { value: "3" } },
+    );
+    rerender(
+      view({
+        ...initialData,
+        settingsConfig: { auth: {}, config: "# synthetic live settings" },
+        meta: { ...initialData.meta },
+      }),
+    );
+    expect(
+      screen.getByLabelText(zh.providerBudget.recoveryTimeoutSecs),
+    ).toHaveValue(3);
+    fireEvent.click(screen.getByRole("button", { name: "save-provider" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0].meta.requestBudget).toEqual({
+      recoveryTimeoutSecs: 3,
+    });
   });
 
   it("persists the selected managed account while stripping OAuth secrets", async () => {

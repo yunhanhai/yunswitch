@@ -35,6 +35,8 @@ CodexBar 对应的公开参考文件为 [GrokAuth.swift](https://github.com/stei
 
 2026-11-23 另行评估补丁提交 `560176bbb74a0bceb2dc4836e70b99f33214c1b0` 的预算、主备切换、缓存键和流错误处理，见[优化对照](SHIM-OPTIMIZATION-REVIEW.md)。本次没有复制新代码或资源进产品；仓库内复现脚本只在临时目录读取用户指定仓库的固定 Git 对象。已发现的状态请求重放、取消后重试和错误分类问题不采用，后续改编需另记范围。
 
+后续[供应商独立请求预算](PROVIDER-REQUEST-BUDGETS.md)借鉴该固定快照的路由预算拆分思路，按既有 Rust 转发器、恢复许可和诊断机制自行实现，没有复制 Node 重试代码或增加依赖。供应商覆盖位于 `provider.rs`、`proxy/request_budget.rs`、`forwarder.rs` 及供应商表单；保留取消、上游等待、状态请求和输出后不重放保护，验证状态见功能文档。
+
 ### 增量压缩响应依赖
 
 `.6` 使用 `async-compression 0.4.41`、`compression-codecs 0.4.37` 和 `compression-core 0.4.31` 作为 Cargo 依赖，版本与校验值固定在 `src-tauri/Cargo.lock`。crate 的来源分别为提交 `269174b4be20e3cfcbb7e7fa4d7d9596183e287b`、`9d848a02f13f3a56542e4123be8947a8da06097e` 和 `2a28343998e67ea519b87005b9d295b134c00dd0`，原项目为 [async-compression](https://github.com/Nullus157/async-compression)。依赖许可为 MIT OR Apache-2.0，本项目采用 MIT 选项；[MIT 原文](https://github.com/Nullus157/async-compression/blob/269174b4be20e3cfcbb7e7fa4d7d9596183e287b/LICENSE-MIT)保存于 [Async-Compression-MIT.txt](../licenses/Async-Compression-MIT.txt)。

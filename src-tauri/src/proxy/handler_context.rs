@@ -364,10 +364,10 @@ impl RequestContext {
     ///
     /// 配置生效规则：
     /// - 故障转移开启：返回配置的值（0 表示禁用超时检查）
-    /// - 故障转移关闭：返回 0（禁用超时检查）
+    /// - 故障转移关闭：应用超时按旧策略禁用；显式供应商覆盖仍生效
     #[inline]
     pub fn streaming_timeout_config(&self) -> StreamingTimeoutConfig {
-        if self.app_config.auto_failover_enabled {
+        let inherited = if self.app_config.auto_failover_enabled {
             // 故障转移开启：使用配置的值（0 = 禁用超时）
             StreamingTimeoutConfig {
                 first_byte_timeout: self.app_config.streaming_first_byte_timeout as u64,
@@ -379,7 +379,8 @@ impl RequestContext {
                 first_byte_timeout: 0,
                 idle_timeout: 0,
             }
-        }
+        };
+        super::request_budget::streaming(&self.provider, inherited)
     }
 }
 
@@ -933,7 +934,7 @@ mod tests {
             let state = build_state(db);
             let provider = Provider::with_id("p".to_string(), "p".to_string(), json!({}), None);
 
-            let ctx = RequestContext {
+            let mut ctx = RequestContext {
                 start_time: Instant::now(),
                 app_config,
                 provider: provider.clone(),
@@ -955,6 +956,17 @@ mod tests {
                 ctx.create_forwarder(&state).retry_budget(),
                 (1, 2, 250, 4000)
             );
+            assert_eq!(ctx.streaming_timeout_config().idle_timeout, 0);
+            ctx.provider.meta = Some(crate::provider::ProviderMeta {
+                request_budget: Some(crate::provider::ProviderRequestBudget {
+                    first_byte_timeout_secs: Some(12),
+                    idle_timeout_secs: Some(34),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            });
+            let timeout = ctx.streaming_timeout_config();
+            assert_eq!((timeout.first_byte_timeout, timeout.idle_timeout), (12, 34));
         }
     }
 }
