@@ -127,20 +127,11 @@ impl Drop for ObservedBody {
 }
 
 fn stream_error(error: &(dyn Error + 'static)) -> DiagnosticError {
-    let mut cause = Some(error);
-    while let Some(error) = cause {
-        if error
-            .downcast_ref::<std::io::Error>()
-            .is_some_and(|error| error.kind() == std::io::ErrorKind::TimedOut)
-            || error
-                .downcast_ref::<reqwest::Error>()
-                .is_some_and(reqwest::Error::is_timeout)
-        {
-            return DiagnosticError::new(ErrorClass::Timeout);
-        }
-        cause = error.source();
-    }
-    DiagnosticError::new(ErrorClass::ResponseInterrupted)
+    use crate::proxy::providers::StreamTransportError;
+    DiagnosticError::new(match StreamTransportError::from_error(error) {
+        StreamTransportError::Timeout => ErrorClass::Timeout,
+        StreamTransportError::Interrupted => ErrorClass::ResponseInterrupted,
+    })
 }
 
 // This scratch space exists only while forwarding an SSE body. An oversized
@@ -311,7 +302,10 @@ fn classify_event_error(error: Option<&Value>, top_level_code: Option<&str>) -> 
             | "context_length_exceeded"
             | "model_not_found",
         ) => ErrorClass::InvalidRequest,
-        Some("timeout" | "request_timeout" | "gateway_timeout") => ErrorClass::Timeout,
+        Some("timeout" | "request_timeout" | "gateway_timeout" | "stream_timeout") => {
+            ErrorClass::Timeout
+        }
+        Some("stream_error") => ErrorClass::ResponseInterrupted,
         _ => ErrorClass::Upstream,
     };
     DiagnosticError::new(class)
@@ -320,6 +314,26 @@ fn classify_event_error(error: Option<&Value>, top_level_code: Option<&str>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn generated_stream_errors_keep_safe_diagnostic_categories() {
+        for (code, expected) in [
+            ("stream_timeout", ErrorClass::Timeout),
+            ("stream_error", ErrorClass::ResponseInterrupted),
+        ] {
+            for event in [
+                serde_json::json!({"type":"error","error":{"type":code}}),
+                serde_json::json!({"type":"response.failed","response":{"error":{"type":code}}}),
+            ] {
+                let input = format!("data: {event}\n\n");
+                let mut inspection = SseInspection::default();
+                assert!(matches!(
+                    inspection.feed(input.as_bytes()),
+                    Some(Outcome::Error(error)) if error.class == expected
+                ));
+            }
+        }
+    }
 
     #[test]
     fn observes_fragmented_error_after_oversized_event_without_retaining_content() {

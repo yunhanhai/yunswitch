@@ -22,6 +22,92 @@ pub(crate) fn take_sse_block(buffer: &mut String) -> Option<String> {
     Some(block)
 }
 
+/// Inspection scratch space only. An oversized event is skipped through its
+/// blank-line boundary; callers continue forwarding the original bytes.
+/// Consume one event at a time so a large transport chunk cannot build a list
+/// of retained events. UTF-8 is decoded only after the whole event is present.
+pub(crate) const MAX_OBSERVED_SSE_EVENT_BYTES: usize = 256 * 1024;
+
+#[derive(Default)]
+pub(crate) struct BoundedSseBuffer {
+    event: Vec<u8>,
+    line_has_content: bool,
+    oversized: bool,
+    ready: bool,
+}
+
+impl BoundedSseBuffer {
+    pub(crate) fn next_event<'a>(&'a mut self, input: &mut &[u8]) -> Option<&'a [u8]> {
+        if self.ready {
+            self.event.clear();
+            self.ready = false;
+        }
+        while !input.is_empty() {
+            let count = input
+                .iter()
+                .position(|byte| *byte == b'\n')
+                .map_or(input.len(), |end| end + 1);
+            let (part, rest) = input.split_at(count);
+            *input = rest;
+            let ended = part.last() == Some(&b'\n');
+            let line = if ended { &part[..part.len() - 1] } else { part };
+            self.line_has_content |= line.iter().any(|byte| *byte != b'\r');
+            if ended && !self.line_has_content {
+                if self.oversized {
+                    self.event.clear();
+                    self.oversized = false;
+                } else if !self.event.is_empty() {
+                    self.ready = true;
+                    return Some(&self.event);
+                }
+            } else if !self.oversized {
+                if part.len() <= MAX_OBSERVED_SSE_EVENT_BYTES - self.event.len() {
+                    let needed = self.event.len() + part.len();
+                    if needed > self.event.capacity() {
+                        let capacity = needed
+                            .max(self.event.capacity().saturating_mul(2))
+                            .min(MAX_OBSERVED_SSE_EVENT_BYTES);
+                        self.event.reserve_exact(capacity - self.event.len());
+                    }
+                    self.event.extend_from_slice(part);
+                } else {
+                    self.event.clear();
+                    self.oversized = true;
+                }
+            }
+            if ended {
+                self.line_has_content = false;
+            }
+        }
+        None
+    }
+}
+
+/// SSE multi-line data is joined with LF, as specified by the event protocol.
+/// The common one-line JSON case borrows the bounded event without a copy.
+pub(crate) fn observed_sse_data(event: &[u8]) -> Option<std::borrow::Cow<'_, str>> {
+    let text = std::str::from_utf8(event)
+        .ok()?
+        .trim_start_matches('\u{feff}');
+    let mut data = text.lines().filter_map(|line| {
+        line.strip_prefix("data:")
+            .map(|value| value.strip_prefix(' ').unwrap_or(value))
+    });
+    let first = data.next()?;
+    let Some(second) = data.next() else {
+        return Some(std::borrow::Cow::Borrowed(first));
+    };
+    let mut joined = String::with_capacity(event.len());
+    joined.push_str(first);
+    joined.push('\n');
+    joined.push_str(second);
+    for line in data {
+        joined.push('\n');
+        joined.push_str(line);
+    }
+    Some(std::borrow::Cow::Owned(joined))
+}
+
 /// Append raw bytes to a UTF-8 `String` buffer, correctly handling multi-byte
 /// characters that are split across chunk boundaries.
 ///
@@ -88,6 +174,54 @@ pub(crate) fn append_utf8_safe(buffer: &mut String, remainder: &mut Vec<u8>, new
 #[cfg(test)]
 mod tests {
     use super::{append_utf8_safe, strip_sse_field, take_sse_block};
+
+    #[test]
+    fn bounded_observation_skips_oversize_and_resumes_across_split_crlf() {
+        use super::{observed_sse_data, BoundedSseBuffer, MAX_OBSERVED_SSE_EVENT_BYTES};
+        let mut observer = BoundedSseBuffer::default();
+        let chunk = vec![b'x'; 4096];
+        for _ in 0..1024 {
+            assert!(observer.next_event(&mut chunk.as_slice()).is_none());
+            assert!(observer.event.capacity() <= MAX_OBSERVED_SSE_EVENT_BYTES);
+            assert!(observer.event.len() <= MAX_OBSERVED_SSE_EVENT_BYTES);
+        }
+        for fragment in [b"\r".as_slice(), b"\n\r", b"\n"] {
+            assert!(observer.next_event(&mut fragment.as_ref()).is_none());
+        }
+        let bytes = "data: {\"model\":\"模型\",\r\ndata: \"usage\":{\"input_tokens\":7}}\r\n\r\n"
+            .as_bytes();
+        let mut found = Vec::new();
+        for chunk in bytes.chunks(1) {
+            if let Some(event) = observer.next_event(&mut chunk.as_ref()) {
+                found.push(observed_sse_data(event).unwrap().into_owned());
+            }
+        }
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&found[0]).unwrap()["usage"]["input_tokens"],
+            7
+        );
+        assert!(!observer.oversized);
+    }
+
+    #[test]
+    fn bounded_observation_consumes_each_event_once_without_a_chunk_sized_queue() {
+        use super::{observed_sse_data, BoundedSseBuffer};
+        let mut observer = BoundedSseBuffer::default();
+        let input = b"data:{\"usage\":1}\n\n: heartbeat\n\ndata: [DONE]\n\n";
+        let mut remaining = input.as_slice();
+        assert_eq!(
+            observed_sse_data(observer.next_event(&mut remaining).unwrap()).as_deref(),
+            Some("{\"usage\":1}")
+        );
+        assert!(observed_sse_data(observer.next_event(&mut remaining).unwrap()).is_none());
+        assert_eq!(
+            observed_sse_data(observer.next_event(&mut remaining).unwrap()).as_deref(),
+            Some("[DONE]")
+        );
+        assert!(observer.next_event(&mut remaining).is_none());
+        assert!(remaining.is_empty());
+    }
 
     #[test]
     fn strip_sse_field_accepts_optional_space() {

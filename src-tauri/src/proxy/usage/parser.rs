@@ -70,6 +70,121 @@ pub struct TokenUsage {
     pub message_id: Option<String>,
 }
 
+/// Incremental form of the Claude stream parser. Keeps the same input/cache correction
+/// rules without retaining message bodies or an event per token.
+#[derive(Default)]
+pub(super) struct ClaudeStreamUsage {
+    usage: TokenUsage,
+    model: Option<String>,
+    message_id: Option<String>,
+    input_from_delta: bool,
+}
+
+impl ClaudeStreamUsage {
+    pub(super) fn push(&mut self, event: &Value) {
+        if let Some(event_type) = event.get("type").and_then(|v| v.as_str()) {
+            match event_type {
+                "message_start" => {
+                    if let Some(message) = event.get("message") {
+                        if self.model.is_none() {
+                            if let Some(m) = message.get("model").and_then(|v| v.as_str()) {
+                                self.model = Some(m.to_string());
+                            }
+                        }
+                        if self.message_id.is_none() {
+                            if let Some(id) = response_id(message, "id") {
+                                self.message_id = Some(id);
+                            }
+                        }
+                    }
+                    if let Some(msg_usage) = event.get("message").and_then(|m| m.get("usage")) {
+                        // 从 message_start 获取 input_tokens（原生 Claude API）
+                        if let Some(input) = msg_usage.get("input_tokens").and_then(|v| v.as_u64())
+                        {
+                            self.usage.input_tokens = input as u32;
+                        }
+                        self.usage.cache_read_tokens = msg_usage
+                            .get("cache_read_input_tokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0)
+                            as u32;
+                        self.usage.cache_creation_tokens = msg_usage
+                            .get("cache_creation_input_tokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0)
+                            as u32;
+                    }
+                }
+                "message_delta" => {
+                    if let Some(delta_usage) = event.get("usage") {
+                        // 从 message_delta 获取 output_tokens
+                        if let Some(output) =
+                            delta_usage.get("output_tokens").and_then(|v| v.as_u64())
+                        {
+                            self.usage.output_tokens = output as u32;
+                        }
+
+                        let delta_input = delta_usage
+                            .get("input_tokens")
+                            .and_then(|v| v.as_u64())
+                            .map(|v| v as u32);
+                        let delta_cache_read = delta_usage
+                            .get("cache_read_input_tokens")
+                            .and_then(|v| v.as_u64())
+                            .map(|v| v as u32);
+                        let delta_cache_creation = delta_usage
+                            .get("cache_creation_input_tokens")
+                            .and_then(|v| v.as_u64())
+                            .map(|v| v as u32);
+
+                        // 部分 Anthropic-compatible SSE provider 会在 message_start 上报完整上下文，
+                        // 但在 message_delta 上报修正后的 fresh input。遇到更小的正数 delta input
+                        // 时采用 delta；若同一 usage 块带有缓存计数，也同步采用以避免重复计数。
+                        // 若 delta 缺少缓存字段，则保留 start 中已有的缓存值作为 best-effort fallback。
+                        if let Some(input) = delta_input {
+                            let should_use_delta_input = input > 0
+                                && (self.usage.input_tokens == 0
+                                    || input < self.usage.input_tokens
+                                    || (self.input_from_delta && input <= self.usage.input_tokens));
+
+                            if should_use_delta_input {
+                                self.usage.input_tokens = input;
+                                self.input_from_delta = true;
+                                if let Some(cache_read) = delta_cache_read {
+                                    self.usage.cache_read_tokens = cache_read;
+                                }
+                                if let Some(cache_creation) = delta_cache_creation {
+                                    self.usage.cache_creation_tokens = cache_creation;
+                                }
+                            }
+                        }
+                        // 从 message_delta 中处理缓存命中(cache_read_input_tokens)
+                        if self.usage.cache_read_tokens == 0 {
+                            if let Some(cache_read) = delta_cache_read {
+                                self.usage.cache_read_tokens = cache_read;
+                            }
+                        }
+                        // 从 message_delta 中处理缓存创建(cache_creation_input_tokens)
+                        // 注: 现在 zhipu 没有返回 cache_creation_input_tokens 字段
+                        if self.usage.cache_creation_tokens == 0 {
+                            if let Some(cache_creation) = delta_cache_creation {
+                                self.usage.cache_creation_tokens = cache_creation;
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    pub(super) fn into_usage(mut self) -> TokenUsage {
+        self.usage.model = self.model;
+        self.usage.message_id = self.message_id;
+        self.usage
+    }
+}
+
 impl TokenUsage {
     /// 生成稳定 request_id。Claude 不加作用域，以便继续与 session JSONL 的
     /// `session:{message_id}` 主键收敛；其他协议加入 app/provider 作用域，避免
@@ -129,120 +244,14 @@ impl TokenUsage {
     /// 从 Claude API 流式响应解析
     #[allow(dead_code)]
     pub fn from_claude_stream_events(events: &[Value]) -> Option<Self> {
-        let mut usage = Self::default();
-        let mut model: Option<String> = None;
-        let mut message_id: Option<String> = None;
-        let mut input_from_delta = false;
-
+        let mut summary = ClaudeStreamUsage::default();
         for event in events {
-            if let Some(event_type) = event.get("type").and_then(|v| v.as_str()) {
-                match event_type {
-                    "message_start" => {
-                        if let Some(message) = event.get("message") {
-                            if model.is_none() {
-                                if let Some(m) = message.get("model").and_then(|v| v.as_str()) {
-                                    model = Some(m.to_string());
-                                }
-                            }
-                            if message_id.is_none() {
-                                if let Some(id) = response_id(message, "id") {
-                                    message_id = Some(id);
-                                }
-                            }
-                        }
-                        if let Some(msg_usage) = event.get("message").and_then(|m| m.get("usage")) {
-                            // 从 message_start 获取 input_tokens（原生 Claude API）
-                            if let Some(input) =
-                                msg_usage.get("input_tokens").and_then(|v| v.as_u64())
-                            {
-                                usage.input_tokens = input as u32;
-                            }
-                            usage.cache_read_tokens = msg_usage
-                                .get("cache_read_input_tokens")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or(0)
-                                as u32;
-                            usage.cache_creation_tokens = msg_usage
-                                .get("cache_creation_input_tokens")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or(0)
-                                as u32;
-                        }
-                    }
-                    "message_delta" => {
-                        if let Some(delta_usage) = event.get("usage") {
-                            // 从 message_delta 获取 output_tokens
-                            if let Some(output) =
-                                delta_usage.get("output_tokens").and_then(|v| v.as_u64())
-                            {
-                                usage.output_tokens = output as u32;
-                            }
-
-                            let delta_input = delta_usage
-                                .get("input_tokens")
-                                .and_then(|v| v.as_u64())
-                                .map(|v| v as u32);
-                            let delta_cache_read = delta_usage
-                                .get("cache_read_input_tokens")
-                                .and_then(|v| v.as_u64())
-                                .map(|v| v as u32);
-                            let delta_cache_creation = delta_usage
-                                .get("cache_creation_input_tokens")
-                                .and_then(|v| v.as_u64())
-                                .map(|v| v as u32);
-
-                            // 部分 Anthropic-compatible SSE provider 会在 message_start 上报完整上下文，
-                            // 但在 message_delta 上报修正后的 fresh input。遇到更小的正数 delta input
-                            // 时采用 delta；若同一 usage 块带有缓存计数，也同步采用以避免重复计数。
-                            // 若 delta 缺少缓存字段，则保留 start 中已有的缓存值作为 best-effort fallback。
-                            if let Some(input) = delta_input {
-                                let should_use_delta_input = input > 0
-                                    && (usage.input_tokens == 0
-                                        || input < usage.input_tokens
-                                        || (input_from_delta && input <= usage.input_tokens));
-
-                                if should_use_delta_input {
-                                    usage.input_tokens = input;
-                                    input_from_delta = true;
-                                    if let Some(cache_read) = delta_cache_read {
-                                        usage.cache_read_tokens = cache_read;
-                                    }
-                                    if let Some(cache_creation) = delta_cache_creation {
-                                        usage.cache_creation_tokens = cache_creation;
-                                    }
-                                }
-                            }
-                            // 从 message_delta 中处理缓存命中(cache_read_input_tokens)
-                            if usage.cache_read_tokens == 0 {
-                                if let Some(cache_read) = delta_cache_read {
-                                    usage.cache_read_tokens = cache_read;
-                                }
-                            }
-                            // 从 message_delta 中处理缓存创建(cache_creation_input_tokens)
-                            // 注: 现在 zhipu 没有返回 cache_creation_input_tokens 字段
-                            if usage.cache_creation_tokens == 0 {
-                                if let Some(cache_creation) = delta_cache_creation {
-                                    usage.cache_creation_tokens = cache_creation;
-                                }
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
+            summary.push(event);
         }
-
+        let usage = summary.into_usage();
         // 用 has_billable_tokens 而非仅看 input/output：完全缓存命中、无输出的流式请求
-        // （input==0 && output==0 但 cache_read>0）是真实的 cache-read 计费，必须保留。
-        // Gemini→Anthropic 路径在 input 改为 fresh(promptTokenCount - cachedContentTokenCount)
-        // 后尤其会出现这种全缓存场景；旧 gate 会把它当成"无 usage"丢弃。
-        if usage.has_billable_tokens() {
-            usage.model = model;
-            usage.message_id = message_id;
-            Some(usage)
-        } else {
-            None
-        }
+        // （input==0 && output==0 但 cache_read>0）仍然产生真实的 cache-read 计费。
+        usage.has_billable_tokens().then_some(usage)
     }
 
     /// 从 Codex API 非流式响应解析

@@ -7,6 +7,7 @@
 //! this set of events.
 
 use super::codex_responses_sse as sse;
+use super::stream_error::StreamTransportError;
 use super::transform_codex_anthropic::{
     build_responses_usage_from_anthropic, map_anthropic_stop_reason_to_status,
     responses_reasoning_item_from_anthropic_block,
@@ -719,9 +720,10 @@ pub(crate) fn create_responses_sse_stream_from_anthropic_with_context<
                     }
                 }
                 Err(e) => {
+                    let error = StreamTransportError::from_error(&e);
                     if let Some(event) = state.failed_event(
-                        format!("Stream error: {e}"),
-                        Some("stream_error".to_string()),
+                        error.message().to_string(),
+                        Some(error.code().to_string()),
                     ) {
                         yield Ok(event);
                     }

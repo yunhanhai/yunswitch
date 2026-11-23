@@ -31,3 +31,5 @@
 - 请求恢复策略仍按各应用现有设置执行。原生 Codex 状态请求保留一次发送保护，已有输出或工具活动后不自动重放。加密历史兼容默认关闭。
 
 现有恢复规则见 [Codex Responses 输出前错误恢复](CODEX-STREAM-RECOVERY.md) 与 [Codex Responses 兼容与自动重试](CODEX-RESPONSES-COMPATIBILITY.md)。源码和 Windows 构建的验证进度见 [开发路线](DEVELOPMENT-ROADMAP.md)。
+
+开发源码进一步把代理生成的流传输错误归为固定的响应中断或超时，不在错误消息中暴露底层错误原文，并限制用量观察缓冲和摘要大小。自动生效范围、超大事件可能缺少统计及未覆盖路径见[流安全说明](STREAM-SAFETY.md)。

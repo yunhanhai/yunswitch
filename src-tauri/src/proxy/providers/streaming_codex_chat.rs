@@ -1,6 +1,7 @@
 //! OpenAI Chat Completions SSE → OpenAI Responses SSE conversion.
 
 use super::codex_responses_sse as sse;
+use super::stream_error::StreamTransportError;
 use super::{
     codex_chat_common::{
         extract_reasoning_field_text, split_leading_think_block, strip_leading_think_open_tag,
@@ -875,9 +876,10 @@ pub fn create_responses_sse_stream_from_chat_with_context<E: std::error::Error +
                     }
                 }
                 Err(e) => {
+                    let error = StreamTransportError::from_error(&e);
                     yield Ok(state.failed_event(
-                        format!("Stream error: {e}"),
-                        Some("stream_error".to_string()),
+                        error.message().to_string(),
+                        Some(error.code().to_string()),
                     ));
                     stream_failed = true;
                     break;

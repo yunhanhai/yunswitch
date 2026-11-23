@@ -26,6 +26,8 @@ pub(crate) mod gemini_schema;
 pub mod gemini_shadow;
 pub mod models;
 pub(crate) mod reasoning_bridge;
+mod stream_error;
+pub(crate) use stream_error::{safe_stream_error, StreamTransportError};
 pub mod streaming;
 pub mod streaming_codex_anthropic;
 pub mod streaming_codex_chat;

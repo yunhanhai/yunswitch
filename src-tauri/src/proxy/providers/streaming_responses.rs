@@ -9,6 +9,7 @@
 //! 与 Chat Completions 的 delta chunk 模型完全不同，需要独立的状态机处理。
 
 use super::reasoning_bridge::{encode_openai_reasoning_item, reasoning_summary_text};
+use super::stream_error::StreamTransportError;
 use super::transform_responses::{
     build_anthropic_usage_from_responses, map_responses_stop_reason,
     merge_web_search_result_metadata, responses_to_anthropic_with_web_search_options,
@@ -4456,12 +4457,13 @@ fn create_anthropic_sse_stream_from_responses_raw<E: std::error::Error + Send + 
                     }
                 }
                 Err(e) => {
-                    log::error!("Responses stream error: {e}");
+                    let error = StreamTransportError::from_error(&e);
+                    log::error!("Upstream Responses stream failed: {}", error.code());
                     let error_event = json!({
                         "type": "error",
                         "error": {
-                            "type": "stream_error",
-                            "message": format!("Stream error: {e}")
+                            "type": error.code(),
+                            "message": error.message()
                         }
                     });
                     let sse = format!("event: error\ndata: {}\n\n",
