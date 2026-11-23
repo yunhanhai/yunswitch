@@ -109,21 +109,38 @@ export async function exerciseProviderBudgets(cdp, { check, until, label }) {
     started = true;
 
     // Edit the saved provider in the actual renderer, then read back the values.
+    // Direct IPC fixture setup does not invalidate React Query's provider list.
+    await cdp.evaluate("location.reload()");
     await until(
       () =>
         cdp.evaluate(`(() => {
-      if (document.getElementById('baseUrl')) return true;
-      const back = document.querySelector('button:has(svg.lucide-arrow-left)');
-      if (back) { back.click(); return false; }
-      document.querySelector('button[title="Claude Code"]')?.click();
-      const text = [...document.querySelectorAll('*')].find(item => item.children.length === 0 && item.textContent === 'CI request budget');
+      if (document.querySelector('button[title="Add New Provider"],button[title="添加供应商"]')) return true;
+      document.querySelector('button:has(svg.lucide-arrow-left)')?.click();
+      return false;
+    })()`),
+      "return to provider list after refreshing synthetic fixture",
+    );
+    await cdp.evaluate(
+      "document.querySelector('button[title=\"Claude Code\"]')?.click()",
+    );
+    await until(
+      () =>
+        cdp.evaluate(
+          "[...document.querySelectorAll('h3')].some(item => item.textContent === 'CI request budget')",
+        ),
+      "load synthetic provider into renderer cache",
+    );
+    assert.equal(
+      await cdp.evaluate(`(() => {
+      const text = [...document.querySelectorAll('h3')].find(item => item.textContent === 'CI request budget');
       let card = text;
       while (card && !card.querySelector('button[title="Edit"],button[title="编辑"],button:has(svg.lucide-pencil)')) card = card.parentElement;
       const edit = card?.querySelector('button[title="Edit"],button[title="编辑"],button:has(svg.lucide-pencil)');
-      edit?.click();
-      return false;
+      if (!edit) return false;
+      edit.click();
+      return true;
     })()`),
-      "open synthetic provider budget form",
+      true,
     );
     await until(
       () =>
