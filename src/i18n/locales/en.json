@@ -220,7 +220,8 @@
       "emptyWithError": "Fetch failed — no models available",
       "filterEmpty": "No matching models — adjust your filter",
       "refreshing": "Refreshing the model catalog in the background. Cached models remain available.",
-      "errorPrivacyHint": "For privacy, only the error category and HTTP status are shown; upstream error bodies are not saved."
+      "errorPrivacyHint": "For privacy, only the error category and HTTP status are shown; upstream error bodies are not saved.",
+      "observationFailed": "Refresh status could not be read. Cached models are retained. Select Refresh to try again."
     },
     "sortBy": "Sort by",
     "sortManual": "Manual order",
