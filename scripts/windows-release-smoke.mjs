@@ -745,45 +745,60 @@ async function exerciseModelCatalog(cdp, label) {
       "finish refresh before observer-only check",
     );
     assert.equal(requests.length, 5);
-    await cdp.evaluate(`(() => {
-      const original = window.__TAURI_INTERNALS__.invoke;
-      window.__catalogObserverProbe = {original, reads: 0, loads: 0};
-      window.__TAURI_INTERNALS__.invoke = async function(command, payload, ...rest) {
-        if (command === 'get_model_catalog') {
-          window.__catalogObserverProbe.loads += 1;
-          return ${JSON.stringify(stopped)};
-        }
-        if (command === 'get_model_catalog_cache_status') {
-          window.__catalogObserverProbe.reads += 1;
-          if (window.__catalogObserverProbe.reads === 1) return null;
-          throw new Error('synthetic-private-observation-error');
-        }
-        return original.call(this, command, payload, ...rest);
-      };
-    })()`);
-    try {
-      await openCatalog();
-      await until(
-        () =>
-          cdp.evaluate(
-            "document.body.innerText.includes('Refresh status could not be read') || document.body.innerText.includes('无法读取刷新状态')",
-          ),
-        "catalog observer safely reports unavailable local state",
+    // Tauri defines invoke as non-writable. Intercept only these IPC fetches;
+    // all other commands keep the real bridge and are restored in finally.
+    for (const failureMode of ["missing", "error"]) {
+      assert.equal(
+        await cdp.evaluate(`(() => {
+          const original = window.fetch;
+          const reply = (value, ok = true) => new Response(JSON.stringify(value), {
+            headers: {'Content-Type': 'application/json', 'Tauri-Response': ok ? 'ok' : 'error'},
+          });
+          window.__catalogObserverProbe = {original, reads: 0, loads: 0};
+          window.fetch = function(input, ...rest) {
+            const url = new URL(typeof input === 'string' ? input : input.url);
+            if (url.hostname === 'ipc.localhost') {
+              if (url.pathname === '/get_model_catalog') {
+                window.__catalogObserverProbe.loads += 1;
+                return Promise.resolve(reply(${JSON.stringify(stopped)}));
+              }
+              if (url.pathname === '/get_model_catalog_cache_status') {
+                window.__catalogObserverProbe.reads += 1;
+                return Promise.resolve(${JSON.stringify(failureMode)} === 'missing'
+                  ? reply(null)
+                  : reply('synthetic-private-observation-error', false));
+              }
+            }
+            return original.call(this, input, ...rest);
+          };
+          return window.fetch !== original;
+        })()`),
+        true,
       );
-      const probe = await cdp.evaluate(
-        "({reads:window.__catalogObserverProbe.reads,loads:window.__catalogObserverProbe.loads,text:document.body.innerText})",
-      );
-      assert.equal(probe.loads, 1);
-      assert.equal(probe.reads, 1);
-      assert.ok(!probe.text.includes("synthetic-private-observation-error"));
-      await cdp.screenshot(
-        `${label.replaceAll(" ", "-")}-model-catalog-observer.png`,
-      );
-      await closeCatalog();
-    } finally {
-      await cdp.evaluate(
-        "window.__TAURI_INTERNALS__.invoke = window.__catalogObserverProbe.original; delete window.__catalogObserverProbe;",
-      );
+      try {
+        await openCatalog();
+        await until(
+          () =>
+            cdp.evaluate(
+              "document.body.innerText.includes('Refresh status could not be read') || document.body.innerText.includes('无法读取刷新状态')",
+            ),
+          "catalog observer safely reports unavailable local state",
+        );
+        const probe = await cdp.evaluate(
+          "({reads:window.__catalogObserverProbe.reads,loads:window.__catalogObserverProbe.loads,text:document.body.innerText})",
+        );
+        assert.equal(probe.loads, 1);
+        assert.equal(probe.reads, 1);
+        assert.ok(!probe.text.includes("synthetic-private-observation-error"));
+        await cdp.screenshot(
+          `${label.replaceAll(" ", "-")}-model-catalog-observer-${failureMode}.png`,
+        );
+        await closeCatalog();
+      } finally {
+        await cdp.evaluate(
+          "window.fetch = window.__catalogObserverProbe.original; delete window.__catalogObserverProbe;",
+        );
+      }
     }
     assert.equal(
       requests.length,
