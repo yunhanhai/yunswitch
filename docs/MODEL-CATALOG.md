@@ -33,3 +33,5 @@ Windows clean-runner [复验 `45121111332`](https://github.com/yunhanhai/yunswit
 本轮包来自[构建 `45117277013`](https://github.com/yunhanhai/yunswitch/actions/runs/45117277013)，产品源码 `42173ceb885286697235944173e48d7edc8e9d49`；复验脚本源码 `727dbc7ae56b484ffafcd6ba23f2fd16e949a434`，产品及许可证源文件未变。首次验收因脚本试图替换 Tauri 只读 `invoke` 属性，未成功注入缺失状态而失败；改为仅拦截目录命令的 IPC fetch 响应，再复用原包完成复验。未修改产品代码来配合注入。
 
 回读 MSI SHA-256 为 `569aadb6fb2be644cdffae614d9f66885a2de3d8376648265201e3620d8c273c`，便携 ZIP 为 `de4390a843da57a86cc167ca3e86ced8a903e38964b23bc54381527b6bd3bc29`。两者与构建验收记录相同；公开版本号、标签与 `.8` Release 附件未更换。
+
+证据已回读至本机 `.git/catalog-observation-accepted/`，包含 `results.json`、`package-provenance.json` 及截图。已目视核对便携与升级后 MSI 的缺失/异常状态提示：已有模型仍显示，界面没有原始 IPC 错误内容，提示未被首次配置弹窗遮挡。
