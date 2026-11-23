@@ -62,6 +62,7 @@ pub(crate) enum ErrorClass {
     NoProvider,
     Network,
     Timeout,
+    RecoveryBudget,
     Upstream,
     ResponseTooLarge,
     ResponseInterrupted,
@@ -103,7 +104,7 @@ impl DiagnosticError {
     }
 
     fn phase(self) -> Phase {
-        if self.class == ErrorClass::Timeout {
+        if matches!(self.class, ErrorClass::Timeout | ErrorClass::RecoveryBudget) {
             Phase::TimedOut
         } else {
             Phase::Failed
@@ -119,6 +120,7 @@ impl From<&ProxyError> for DiagnosticError {
             RateLimited { .. } => return Self::http(429),
             BillingExhausted(_) => ErrorClass::Billing,
             Timeout(_) | StreamIdleTimeout(_) => ErrorClass::Timeout,
+            RecoveryBudgetExceeded => ErrorClass::RecoveryBudget,
             AuthError(_) => ErrorClass::Authentication,
             ForwardFailed(_) => ErrorClass::Network,
             NoAvailableProvider
@@ -160,6 +162,8 @@ pub(crate) struct Step {
     planned_wait_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     wait_limit_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    recovery_budget_remaining_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<DiagnosticError>,
 }
@@ -267,6 +271,7 @@ impl Record {
         current.elapsed_ms = offset.saturating_sub(current.offset_ms);
         let provider_ref = current.provider_ref.clone();
         let model = current.model.clone();
+        let recovery_budget_remaining_ms = current.recovery_budget_remaining_ms;
         if self.steps.len() >= MAX_STEPS {
             // Keep the start and the latest steps, including the outcome.
             self.steps.remove(1);
@@ -282,6 +287,7 @@ impl Record {
             reason,
             planned_wait_ms: None,
             wait_limit_ms: None,
+            recovery_budget_remaining_ms,
             error: None,
         });
         self.current()
@@ -421,6 +427,7 @@ impl Diagnostics {
                     reason: None,
                     planned_wait_ms: None,
                     wait_limit_ms: None,
+                    recovery_budget_remaining_ms: None,
                     error: None,
                 }]),
                 omitted_steps: 0,
@@ -501,6 +508,7 @@ impl RequestTrace {
             };
             current.provider_ref = Some(reference);
             current.model = None;
+            current.recovery_budget_remaining_ms = None;
         });
     }
 
@@ -545,6 +553,10 @@ impl RequestTrace {
 
     pub(crate) fn note_error(&self, error: DiagnosticError) {
         self.update(|record| record.current().error = Some(error));
+    }
+
+    pub(crate) fn recovery_budget(&self, remaining_ms: Option<u64>) {
+        self.update(|record| record.current().recovery_budget_remaining_ms = remaining_ms);
     }
 
     fn streaming(&self) {
@@ -620,6 +632,30 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn recovery_budget_diagnostic_is_bounded_numeric_metadata_with_timeout_terminal() {
+        let store = Arc::new(Diagnostics::default());
+        store.start();
+        let mut request = store.begin("codex").unwrap();
+        let trace = request.trace.as_ref().unwrap();
+        let id = trace.id.clone();
+        trace.provider("synthetic-private-provider", false);
+        trace.recovery_budget(Some(1234));
+        trace.send(Some("synthetic-private-model"));
+        trace.step(Phase::CoolingDown, Reason::RetryAfter, Some(3000), None);
+        trace.recovery_budget(Some(0));
+        request.finish(Outcome::Error((&ProxyError::RecoveryBudgetExceeded).into()));
+        let row = store.detail(&id).unwrap();
+        assert_eq!(row.summary.current.phase, Phase::TimedOut);
+        assert_eq!(
+            row.summary.current.error.unwrap().class,
+            ErrorClass::RecoveryBudget
+        );
+        let text = serde_json::to_string(&row).unwrap();
+        assert!(text.contains("recoveryBudgetRemainingMs"));
+        assert!(!text.contains("synthetic-private"));
+    }
 
     #[tokio::test]
     async fn history_expiration_and_capacity_never_evict_other_live_requests() {

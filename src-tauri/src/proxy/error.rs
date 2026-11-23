@@ -75,6 +75,9 @@ pub enum ProxyError {
     #[error("超时: {0}")]
     Timeout(String),
 
+    #[error("Request recovery budget exhausted before response delivery")]
+    RecoveryBudgetExceeded,
+
     /// 流式响应空闲超时
     #[allow(dead_code)]
     #[error("流式响应空闲超时: {0}秒无数据")]
@@ -161,7 +164,9 @@ impl IntoResponse for ProxyError {
                         (StatusCode::UNPROCESSABLE_ENTITY, self.to_string())
                     }
                     ProxyError::InvalidRequest(_) => (StatusCode::BAD_REQUEST, self.to_string()),
-                    ProxyError::Timeout(_) => (StatusCode::GATEWAY_TIMEOUT, self.to_string()),
+                    ProxyError::Timeout(_) | ProxyError::RecoveryBudgetExceeded => {
+                        (StatusCode::GATEWAY_TIMEOUT, self.to_string())
+                    }
                     ProxyError::StreamIdleTimeout(_) => {
                         (StatusCode::GATEWAY_TIMEOUT, self.to_string())
                     }

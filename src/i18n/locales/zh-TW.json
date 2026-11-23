@@ -3141,8 +3141,10 @@
         "responseInterrupted": "回應中斷",
         "incomplete": "回應未完成",
         "recoveryWaitLimit": "恢復等待超過設定上限",
-        "internal": "本機代理錯誤"
-      }
+        "internal": "本機代理錯誤",
+        "recoveryBudget": "輸出前總預算已耗盡"
+      },
+      "recoveryBudgetRemaining": "輸出前預算剩餘 {{time}}"
     },
     "resilience": {
       "todayFailovers": "今日轉移",
@@ -3519,5 +3521,20 @@
     "noSuggestions": "沒有可合併的映射（需同一模型名出現在兩個以上供應商）",
     "suggestionsTitle": "發現 {{count}} 組可合併的模型",
     "adopt": "採用"
+  },
+  "providerBudget": {
+    "title": "本機代理請求預算",
+    "description": "留空沿用應用程式現有策略；填寫後僅覆寫此供應商，對經本機代理傳送的新請求生效，關閉故障轉移時也有效。",
+    "inherit": "沿用應用程式策略",
+    "firstByteTimeoutSecs": "首位元組預算（秒）",
+    "firstByteTimeoutSecsHint": "等待上游回應及首段資料的最長時間。",
+    "idleTimeoutSecs": "串流閒置預算（秒）",
+    "idleTimeoutSecsHint": "開始輸出後，連續收不到資料的最長時間。",
+    "nonStreamingTimeoutSecs": "非串流預算（秒）",
+    "nonStreamingTimeoutSecsHint": "單次傳送至讀取完整回應本文的最長時間。",
+    "recoveryTimeoutSecs": "輸出前總預算（秒）",
+    "recoveryTimeoutSecsHint": "從首次嘗試計時，包含傳送、冷卻、排隊及重試；切換備援不重設，已開始的輸出不受此總期限截斷。",
+    "range": "可填寫 1–3600 的整數秒。清空欄位即可恢復繼承；不會增加重試次數或縮短上游冷卻。",
+    "invalid": "請求預算須為 1–3600 的整數秒，或留空沿用現有策略。"
   }
 }

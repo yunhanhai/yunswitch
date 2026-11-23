@@ -3141,8 +3141,10 @@
         "responseInterrupted": "响应中断",
         "incomplete": "响应未完成",
         "recoveryWaitLimit": "恢复等待超过设定上限",
-        "internal": "本地代理错误"
-      }
+        "internal": "本地代理错误",
+        "recoveryBudget": "输出前总预算已耗尽"
+      },
+      "recoveryBudgetRemaining": "输出前预算剩余 {{time}}"
     },
     "resilience": {
       "todayFailovers": "今日转移",
@@ -3519,5 +3521,20 @@
     "noSuggestions": "没有可归并的映射（需同一模型名出现在两个以上渠道）",
     "suggestionsTitle": "发现 {{count}} 组可归并的模型",
     "adopt": "采纳"
+  },
+  "providerBudget": {
+    "title": "本地代理请求预算",
+    "description": "留空沿用应用现有策略；填写后仅覆盖此供应商，经本地代理发送的新请求生效，关闭故障转移时也有效。",
+    "inherit": "沿用应用策略",
+    "firstByteTimeoutSecs": "首字节预算（秒）",
+    "firstByteTimeoutSecsHint": "等待上游响应及首段数据的最长时间。",
+    "idleTimeoutSecs": "流空闲预算（秒）",
+    "idleTimeoutSecsHint": "输出开始后，连续收不到数据的最长时间。",
+    "nonStreamingTimeoutSecs": "非流式预算（秒）",
+    "nonStreamingTimeoutSecsHint": "单次发送到完整响应体读取的最长时间。",
+    "recoveryTimeoutSecs": "输出前总预算（秒）",
+    "recoveryTimeoutSecsHint": "从首次尝试计时，包含发送、冷却、排队和重试；切换备用不重置，已开始的输出不受此总期限截断。",
+    "range": "可填写 1–3600 的整数秒。清空字段即可恢复继承；不会增加重试次数或缩短上游冷却。",
+    "invalid": "请求预算需为 1–3600 的整数秒，或留空沿用现有策略。"
   }
 }

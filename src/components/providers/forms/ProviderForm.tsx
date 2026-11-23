@@ -92,6 +92,11 @@ import {
   ProviderAdvancedConfig,
   type PricingModelSourceOption,
 } from "./ProviderAdvancedConfig";
+import { ProviderRequestBudgetFields } from "./ProviderRequestBudgetFields";
+import {
+  parseRequestBudget,
+  requestBudgetDraft,
+} from "@/utils/providerRequestBudget";
 import {
   useProviderCategory,
   useApiKeyState,
@@ -425,6 +430,7 @@ function ProviderFormFull({
     setCodexChatReasoning(initialData?.meta?.codexChatReasoning ?? {});
     setPromptCacheRouting(initialData?.meta?.promptCacheRouting ?? "auto");
     setCustomUserAgent(initialData?.meta?.customUserAgent ?? "");
+    setRequestBudget(requestBudgetDraft(initialData?.meta?.requestBudget));
     setLocalProxyHeadersOverride(
       formatRequestOverrideObject(
         initialData?.meta?.localProxyRequestOverrides?.headers,
@@ -621,6 +627,9 @@ function ProviderFormFull({
     useState<PromptCacheRoutingMode>(
       () => initialData?.meta?.promptCacheRouting ?? "auto",
     );
+  const [requestBudget, setRequestBudget] = useState(() =>
+    requestBudgetDraft(initialData?.meta?.requestBudget),
+  );
   const [customUserAgent, setCustomUserAgent] = useState<string>(
     () => initialData?.meta?.customUserAgent ?? "",
   );
@@ -1135,6 +1144,10 @@ function ProviderFormFull({
     (appId === "claude" || appId === "codex") && category !== "official";
 
   const handleSubmit = async (values: ProviderFormData) => {
+    if (parseRequestBudget(requestBudget).invalid) {
+      toast.error(t("providerBudget.invalid"));
+      return;
+    }
     const overridesResult = shouldApplyLocalProxyRequestOverrides
       ? buildLocalProxyRequestOverrides(
           localProxyHeadersOverride,
@@ -1510,6 +1523,10 @@ function ProviderFormFull({
     values: ProviderFormData,
     overridesResult: LocalProxyRequestOverridesBuildResult,
   ) => {
+    if (parseRequestBudget(requestBudget).invalid) {
+      toast.error(t("providerBudget.invalid"));
+      return;
+    }
     if (overridesResult.error) {
       toast.error(
         t("providerForm.localProxyRequestOverridesInvalid", {
@@ -1823,6 +1840,7 @@ function ProviderFormFull({
       localProxyRequestOverrides: shouldApplyLocalProxyRequestOverrides
         ? overridesResult.overrides
         : undefined,
+      requestBudget: parseRequestBudget(requestBudget).value,
       costMultiplier: pricingConfig.enabled
         ? pricingConfig.costMultiplier
         : undefined,
@@ -2889,6 +2907,16 @@ function ProviderFormFull({
               {settingsConfigErrorField}
             </>
           )}
+
+          {(["claude", "codex", "gemini", "grokbuild"] as string[]).includes(
+            appId,
+          ) &&
+            !isAnyOmoCategory && (
+              <ProviderRequestBudgetFields
+                value={requestBudget}
+                onChange={setRequestBudget}
+              />
+            )}
 
           {!isAnyOmoCategory &&
             appId !== "opencode" &&

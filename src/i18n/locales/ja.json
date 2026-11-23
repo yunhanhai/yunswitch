@@ -3141,8 +3141,10 @@
         "responseInterrupted": "応答が中断しました",
         "incomplete": "不完全な応答",
         "recoveryWaitLimit": "回復待機が設定上限を超えました",
-        "internal": "ローカルプロキシエラー"
-      }
+        "internal": "ローカルプロキシエラー",
+        "recoveryBudget": "出力前の合計予算を使い切りました"
+      },
+      "recoveryBudgetRemaining": "出力前の予算残り: {{time}}"
     },
     "resilience": {
       "todayFailovers": "今日の切替",
@@ -3519,5 +3521,20 @@
     "noSuggestions": "統合できるマッピングがありません（同じモデル名が 2 つ以上のチャネルに必要）",
     "suggestionsTitle": "{{count}} 件の統合可能なモデルを検出",
     "adopt": "採用"
+  },
+  "providerBudget": {
+    "title": "ローカルプロキシのリクエスト予算",
+    "description": "空欄はアプリの既存ポリシーを継承します。値を設定すると、このプロバイダーのローカルプロキシ経由の新規リクエストに適用され、フェイルオーバー無効時も有効です。",
+    "inherit": "アプリのポリシーを使用",
+    "firstByteTimeoutSecs": "最初のバイトの予算（秒）",
+    "firstByteTimeoutSecsHint": "上流の応答と最初のデータを待つ最大時間。",
+    "idleTimeoutSecs": "ストリーム無通信の予算（秒）",
+    "idleTimeoutSecsHint": "出力開始後、データを受信しない最大時間。",
+    "nonStreamingTimeoutSecs": "非ストリーミング予算（秒）",
+    "nonStreamingTimeoutSecsHint": "1 回の送信から応答本文全体の読み取りまでの最大時間。",
+    "recoveryTimeoutSecs": "出力前の合計予算（秒）",
+    "recoveryTimeoutSecsHint": "最初の試行から送信、クールダウン、待機、再試行を含めて計測します。切替でリセットせず、開始済みの出力はこの期限で中断しません。",
+    "range": "1～3600 の整数秒を入力してください。空欄で継承に戻ります。再試行回数と上流のクールダウンは維持されます。",
+    "invalid": "予算は 1～3600 の整数秒、または既存ポリシーを継承する空欄にしてください。"
   }
 }

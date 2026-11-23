@@ -429,6 +429,40 @@ impl LocalProxyRequestOverrides {
     }
 }
 
+/// Optional local proxy timeouts. Omitted fields preserve the existing app policy.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderRequestBudget {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_byte_timeout_secs: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idle_timeout_secs: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub non_streaming_timeout_secs: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recovery_timeout_secs: Option<u32>,
+}
+
+impl ProviderRequestBudget {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if [
+            self.first_byte_timeout_secs,
+            self.idle_timeout_secs,
+            self.non_streaming_timeout_secs,
+        ]
+        .into_iter()
+        .flatten()
+        .any(|seconds| seconds == 0 || seconds > 3600)
+            || self
+                .recovery_timeout_secs
+                .is_some_and(|seconds| seconds == 0 || seconds > 3600)
+        {
+            return Err("Request budgets must be whole seconds between 1 and 3600");
+        }
+        Ok(())
+    }
+}
+
 /// 供应商元数据
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProviderMeta {
@@ -540,6 +574,9 @@ pub struct ProviderMeta {
         skip_serializing_if = "Option::is_none"
     )]
     pub local_proxy_request_overrides: Option<LocalProxyRequestOverrides>,
+    /// Local proxy only; absent fields inherit the application's existing policy.
+    #[serde(rename = "requestBudget", skip_serializing_if = "Option::is_none")]
+    pub request_budget: Option<ProviderRequestBudget>,
     /// 累加模式应用中，该 provider 是否已写入 live config。
     /// `None` 表示旧数据/未知状态，`Some(false)` 表示明确仅存在于数据库中。
     #[serde(rename = "liveConfigManaged", skip_serializing_if = "Option::is_none")]
@@ -1011,6 +1048,24 @@ mod tests {
     };
     use serde_json::json;
     use std::collections::HashMap;
+
+    #[test]
+    fn request_budget_roundtrips_without_live_config_or_implicit_defaults() {
+        let value = json!({"requestBudget":{"firstByteTimeoutSecs":30,"recoveryTimeoutSecs":90}});
+        let meta: ProviderMeta = serde_json::from_value(value.clone()).unwrap();
+        let budget = meta.request_budget.as_ref().unwrap();
+        budget.validate().unwrap();
+        assert_eq!(budget.idle_timeout_secs, None);
+        assert_eq!(serde_json::to_value(meta).unwrap(), value);
+        for seconds in [0, 3601, u32::MAX] {
+            assert!(super::ProviderRequestBudget {
+                first_byte_timeout_secs: Some(seconds),
+                ..Default::default()
+            }
+            .validate()
+            .is_err());
+        }
+    }
 
     #[test]
     fn provider_meta_serializes_pricing_model_source() {
