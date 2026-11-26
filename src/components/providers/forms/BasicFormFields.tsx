@@ -25,12 +25,14 @@ import type { ProviderFormData } from "@/lib/schemas/provider";
 
 interface BasicFormFieldsProps {
   form: UseFormReturn<ProviderFormData>;
+  onEdited?: () => void;
   /** Slot to render content between icon and name fields */
   beforeNameSlot?: ReactNode;
 }
 
 export function BasicFormFields({
   form,
+  onEdited,
   beforeNameSlot,
 }: BasicFormFieldsProps) {
   const { t } = useTranslation();
@@ -44,6 +46,7 @@ export function BasicFormFields({
     (currentIcon ? getIconMetadata(currentIcon)?.defaultColor : undefined);
 
   const handleIconSelect = (icon: string) => {
+    onEdited?.();
     const meta = getIconMetadata(icon);
     form.setValue("icon", icon);
     form.setValue("iconColor", meta?.defaultColor ?? "");

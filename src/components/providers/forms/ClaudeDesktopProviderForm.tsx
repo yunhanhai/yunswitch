@@ -1,3 +1,4 @@
+import { useProviderDraftChange } from "./hooks/useProviderDraftChange";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -87,6 +88,7 @@ export interface ClaudeDesktopProviderFormProps {
   onSubmit: (values: ClaudeDesktopProviderFormValues) => Promise<void> | void;
   onCancel: () => void;
   onSubmittingChange?: (isSubmitting: boolean) => void;
+  onDirtyChange?: (dirty: boolean) => void;
   initialData?: {
     name?: string;
     websiteUrl?: string;
@@ -249,11 +251,14 @@ export function ClaudeDesktopProviderForm({
   onSubmit,
   onCancel,
   onSubmittingChange,
+  onDirtyChange,
   initialData,
   showButtons = true,
   onManageAuthAccounts,
 }: ClaudeDesktopProviderFormProps) {
   const { t } = useTranslation();
+  const { markDirty, trackChange, onFieldChange } =
+    useProviderDraftChange(onDirtyChange);
   const [requestBudget, setRequestBudget] = useState(() =>
     requestBudgetDraft(initialData?.meta?.requestBudget),
   );
@@ -501,6 +506,7 @@ export function ClaudeDesktopProviderForm({
   };
 
   const updateRoute = (index: number, patch: Partial<RouteRowValues>) => {
+    markDirty();
     setRoutes((current) =>
       current.map((row, i) => (i === index ? { ...row, ...patch } : row)),
     );
@@ -861,7 +867,7 @@ export function ClaudeDesktopProviderForm({
         type="button"
         variant="outline"
         size="sm"
-        onClick={onAdd}
+        onClick={trackChange(onAdd)}
         className="h-7 gap-1"
       >
         <Plus className="h-3.5 w-3.5" />
@@ -874,6 +880,8 @@ export function ClaudeDesktopProviderForm({
     <Form {...form}>
       <form
         id="provider-form"
+        onChangeCapture={onFieldChange}
+        onInputCapture={onFieldChange}
         onSubmit={form.handleSubmit(handleSubmit)}
         className="space-y-6 glass rounded-xl p-6 border border-white/10"
       >
@@ -882,12 +890,12 @@ export function ClaudeDesktopProviderForm({
             selectedPresetId={selectedPresetId}
             presetEntries={presetEntries}
             presetCategoryLabels={presetCategoryLabels}
-            onPresetChange={handlePresetChange}
+            onPresetChange={trackChange(handlePresetChange)}
             category={activePreset?.category}
           />
         )}
 
-        <BasicFormFields form={form} />
+        <BasicFormFields form={form} onEdited={markDirty} />
 
         {isOfficial && (
           <div className="rounded-lg border border-border-default bg-muted/20 p-3 text-sm text-muted-foreground">
@@ -906,7 +914,7 @@ export function ClaudeDesktopProviderForm({
                   <CopilotAuthSection
                     mode="select"
                     selectedAccountId={selectedGitHubAccountId}
-                    onAccountSelect={setSelectedGitHubAccountId}
+                    onAccountSelect={trackChange(setSelectedGitHubAccountId)}
                     onManageAccounts={
                       onManageAuthAccounts
                         ? () => onManageAuthAccounts("github_copilot")
@@ -917,26 +925,26 @@ export function ClaudeDesktopProviderForm({
                   <CodexOAuthSection
                     mode="select"
                     selectedAccountId={selectedCodexAccountId}
-                    onAccountSelect={setSelectedCodexAccountId}
+                    onAccountSelect={trackChange(setSelectedCodexAccountId)}
                     onManageAccounts={
                       onManageAuthAccounts
                         ? () => onManageAuthAccounts("codex_oauth")
                         : undefined
                     }
                     fastModeEnabled={codexFastMode}
-                    onFastModeChange={setCodexFastMode}
+                    onFastModeChange={trackChange(setCodexFastMode)}
                   />
                 ) : (
                   <XaiOAuthSection
                     selectedAccountId={selectedXaiAccountId}
-                    onAccountSelect={setSelectedXaiAccountId}
+                    onAccountSelect={trackChange(setSelectedXaiAccountId)}
                   />
                 )}
               </div>
             ) : (
               <ApiKeySection
                 value={apiKey}
-                onChange={setApiKey}
+                onChange={trackChange(setApiKey)}
                 category={apiKeyLinkCategory}
                 shouldShowLink={shouldShowApiKeyLink}
                 websiteUrl={apiKeyLinkWebsiteUrl}
@@ -994,9 +1002,9 @@ export function ClaudeDesktopProviderForm({
                   </Label>
                   <Select
                     value={effectiveMode}
-                    onValueChange={(value) =>
-                      handleModelMappingChange(value === "proxy")
-                    }
+                    onValueChange={trackChange((value) =>
+                      handleModelMappingChange(value === "proxy"),
+                    )}
                     disabled={usesManagedOAuth}
                   >
                     <SelectTrigger
@@ -1035,9 +1043,9 @@ export function ClaudeDesktopProviderForm({
                       </Label>
                       <Select
                         value={apiFormat}
-                        onValueChange={(value) =>
-                          setApiFormat(value as ClaudeApiFormat)
-                        }
+                        onValueChange={trackChange((value) =>
+                          setApiFormat(value as ClaudeApiFormat),
+                        )}
                       >
                         <SelectTrigger className="w-full">
                           <SelectValue />
@@ -1291,11 +1299,11 @@ export function ClaudeDesktopProviderForm({
                             type="button"
                             variant="ghost"
                             size="icon"
-                            onClick={() =>
+                            onClick={trackChange(() =>
                               setRoutes((current) =>
                                 current.filter((_, i) => i !== index),
-                              )
-                            }
+                              ),
+                            )}
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -1325,7 +1333,7 @@ export function ClaudeDesktopProviderForm({
         {!isOfficial && (
           <ProviderRequestBudgetFields
             value={requestBudget}
-            onChange={setRequestBudget}
+            onChange={trackChange(setRequestBudget)}
           />
         )}
 

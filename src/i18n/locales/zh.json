@@ -1,4 +1,13 @@
 {
+  "providerDraft": {
+    "discardTitle": "放弃未保存的修改？",
+    "discardMessage": "本次填写的内容尚未保存。选择“继续编辑”可保留当前内容；放弃后需要重新填写。草稿仅在当前窗口内保留。",
+    "discard": "放弃修改",
+    "keep": "继续编辑",
+    "loading": "正在读取当前配置…",
+    "useSaved": "使用已保存配置继续",
+    "saveFailed": "保存未完成，填写内容已保留，请检查后重试。"
+  },
   "app": {
     "title": "YunSwitch",
     "description": "AI 编程工具配置与路由管理"

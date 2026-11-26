@@ -116,3 +116,6 @@ upstream  https://github.com/farion1231/cc-switch.git
 ## 参考项目
 
 仓库定位与文档组织参考 [RuoYi](https://gitee.com/y_project/RuoYi)、[RuoYi-Vue-Plus](https://gitee.com/dromara/RuoYi-Vue-Plus) 和 [RuoYi-Vue-Pro](https://gitee.com/zhijiantianya/ruoyi-vue-pro)：明确上游关系、维护主体和功能差异。这些是文档组织参考，当前没有据此新增框架代码。
+
+
+当前开发：[供应商表单草稿保护](PROVIDER-FORM-DRAFTS.md)修复异步初始化和页签切换丢稿，增加离开确认与保存失败保留。公开 `.9` 原包不变；完成状态与源码/安装包证据分别记录在功能文档。

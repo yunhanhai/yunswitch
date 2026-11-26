@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useForm } from "react-hook-form";
+import { useProviderDraftChange } from "./hooks/useProviderDraftChange";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -265,6 +266,7 @@ export interface ProviderFormProps {
   onManageUniversalProviders?: () => void;
   onManageAuthAccounts?: (target: ManagedAuthProvider) => void;
   onSubmittingChange?: (isSubmitting: boolean) => void;
+  onDirtyChange?: (dirty: boolean) => void;
   onSubmitReadyChange?: (isReady: boolean) => void;
   initialData?: {
     name?: string;
@@ -281,17 +283,64 @@ export interface ProviderFormProps {
 }
 
 export function ProviderForm(props: ProviderFormProps) {
-  if (props.appId === "pi") {
-    return <PiProviderForm {...props} />;
-  }
-  if (props.appId === "claude-desktop") {
-    return <ClaudeDesktopProviderForm {...props} />;
-  }
-  if (props.appId === "grokbuild") {
-    return <GrokBuildProviderForm {...props} />;
-  }
-
-  return <ProviderFormFull {...props} />;
+  const { t } = useTranslation();
+  const [saving, setSaving] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
+  const submitting = useRef(false);
+  const active = useRef(true);
+  useEffect(() => {
+    active.current = true;
+    return () => {
+      active.current = false;
+    };
+  }, []);
+  const submit = async (values: ProviderFormValues) => {
+    if (submitting.current) return;
+    submitting.current = true;
+    setSaving(true);
+    setSaveFailed(false);
+    try {
+      await props.onSubmit(values);
+    } catch {
+      // Preserve the current form and show fixed local guidance, not IPC data.
+      if (active.current) setSaveFailed(true);
+    } finally {
+      submitting.current = false;
+      if (active.current) setSaving(false);
+    }
+  };
+  const childProps = { ...props, onSubmit: submit };
+  const content =
+    props.appId === "pi" ? (
+      <PiProviderForm {...childProps} />
+    ) : props.appId === "claude-desktop" ? (
+      <ClaudeDesktopProviderForm {...childProps} />
+    ) : props.appId === "grokbuild" ? (
+      <GrokBuildProviderForm {...childProps} />
+    ) : (
+      <ProviderFormFull {...childProps} />
+    );
+  return (
+    <>
+      {saveFailed && (
+        <p
+          role="alert"
+          data-testid="provider-draft-save-error"
+          className="mb-3 text-sm text-destructive"
+        >
+          {t("providerDraft.saveFailed")}
+        </p>
+      )}
+      <fieldset
+        disabled={saving}
+        aria-busy={saving}
+        className="min-w-0"
+        {...(saving ? { inert: "" } : {})}
+      >
+        {content}
+      </fieldset>
+    </>
+  );
 }
 
 function ProviderFormFull({
@@ -304,6 +353,7 @@ function ProviderFormFull({
   onManageUniversalProviders,
   onManageAuthAccounts,
   onSubmittingChange,
+  onDirtyChange,
   initialData,
   showButtons = true,
   isProxyTakeover = false,
@@ -313,6 +363,8 @@ function ProviderFormFull({
   }
 
   const { t } = useTranslation();
+  const { trackChange, onFieldChange, markDirty } =
+    useProviderDraftChange(onDirtyChange);
   const isEditMode = Boolean(initialData);
   const initialCodexOfficialIdentity =
     appId === "codex" && initialData
@@ -677,6 +729,45 @@ function ProviderFormFull({
     resetCodexConfig,
   } = useCodexConfigState({ initialData });
 
+  // The remote model list is browse data. Seed an empty mapping once, never
+  // replace saved mappings or user edits when a refresh publishes later.
+  const catalogDraftOwned = useRef(
+    Array.isArray(
+      (
+        initialData?.settingsConfig?.modelCatalog as
+          | { models?: unknown[] }
+          | undefined
+      )?.models,
+    ) &&
+      (initialData?.settingsConfig?.modelCatalog as { models: unknown[] })
+        .models.length > 0,
+  );
+  const handleCatalogDraftChange = useCallback(
+    (models: CodexCatalogModel[]) => {
+      catalogDraftOwned.current = true;
+      setCodexCatalogModels(models);
+    },
+    [setCodexCatalogModels],
+  );
+  const seedCodexCatalog = useCallback(
+    (snapshot: ModelCatalogSnapshot | null) => {
+      if (
+        !snapshot ||
+        snapshot.models.length === 0 ||
+        catalogDraftOwned.current
+      )
+        return;
+      catalogDraftOwned.current = true;
+      setCodexCatalogModels(
+        snapshot.models.map((model) => ({
+          model: model.id,
+          displayName: model.displayName || model.id,
+        })),
+      );
+    },
+    [setCodexCatalogModels],
+  );
+
   const initialCodexApiFormat: CodexApiFormat =
     initialData?.meta?.apiFormat === "openai_chat"
       ? "openai_chat"
@@ -744,6 +835,7 @@ function ProviderFormFull({
   useEffect(() => {
     if (appId === "codex" && !initialData && selectedPresetId === "custom") {
       const template = getCodexCustomTemplate();
+      catalogDraftOwned.current = false;
       resetCodexConfig(template.auth, template.config);
       setCodexChatReasoning({});
       setPromptCacheRouting("auto");
@@ -2027,6 +2119,7 @@ function ProviderFormFull({
 
       if (appId === "codex") {
         const template = getCodexCustomTemplate();
+        catalogDraftOwned.current = false;
         resetCodexConfig(template.auth, template.config);
         setCodexChatReasoning({});
         setPromptCacheRouting("auto");
@@ -2069,6 +2162,7 @@ function ProviderFormFull({
       const auth = preset.auth ?? {};
       const config = preset.config ?? "";
 
+      catalogDraftOwned.current = (preset.modelCatalog?.length ?? 0) > 0;
       resetCodexConfig(auth, config, preset.modelCatalog ?? []);
       setCodexChatReasoning(preset.codexChatReasoning ?? {});
       setPromptCacheRouting(preset.promptCacheRouting ?? "auto");
@@ -2218,6 +2312,8 @@ function ProviderFormFull({
       <Form {...form}>
         <form
           id="provider-form"
+          onChangeCapture={onFieldChange}
+          onInputCapture={onFieldChange}
           onSubmit={form.handleSubmit(handleSubmit)}
           className="space-y-6 glass rounded-xl p-6 border border-white/10"
         >
@@ -2226,7 +2322,7 @@ function ProviderFormFull({
               selectedPresetId={selectedPresetId}
               presetEntries={presetEntries}
               presetCategoryLabels={presetCategoryLabels}
-              onPresetChange={handlePresetChange}
+              onPresetChange={trackChange(handlePresetChange)}
               onUniversalPresetSelect={onUniversalPresetSelect}
               onManageUniversalProviders={onManageUniversalProviders}
               category={category}
@@ -2235,6 +2331,7 @@ function ProviderFormFull({
 
           <BasicFormFields
             form={form}
+            onEdited={markDirty}
             beforeNameSlot={
               appId === "opencode" && !isAnyOmoCategory ? (
                 <div className="space-y-2">
@@ -2449,7 +2546,7 @@ function ProviderFormFull({
                   shouldShowApiKey(form.getValues("settingsConfig"), isEditMode)
                 }
                 apiKey={apiKey}
-                onApiKeyChange={handleApiKeyChange}
+                onApiKeyChange={trackChange(handleApiKeyChange)}
                 category={category}
                 shouldShowApiKeyLink={shouldShowClaudeApiKeyLink}
                 websiteUrl={claudeWebsiteUrl}
@@ -2466,30 +2563,30 @@ function ProviderFormFull({
                 }
                 isCopilotAuthenticated={isCopilotAuthenticated}
                 selectedGitHubAccountId={selectedGitHubAccountId}
-                onGitHubAccountSelect={setSelectedGitHubAccountId}
+                onGitHubAccountSelect={trackChange(setSelectedGitHubAccountId)}
                 onManageAuthAccounts={onManageAuthAccounts}
                 isCodexOauthAuthenticated={isCodexOauthAuthenticated}
                 selectedCodexAccountId={selectedCodexAccountId}
-                onCodexAccountSelect={setSelectedCodexAccountId}
+                onCodexAccountSelect={trackChange(setSelectedCodexAccountId)}
                 codexFastMode={codexFastMode}
-                onCodexFastModeChange={setCodexFastMode}
+                onCodexFastModeChange={trackChange(setCodexFastMode)}
                 isXaiOauthAuthenticated={isXaiOauthAuthenticated}
                 selectedXaiAccountId={selectedXaiAccountId}
-                onXaiAccountSelect={setSelectedXaiAccountId}
+                onXaiAccountSelect={trackChange(setSelectedXaiAccountId)}
                 templateValueEntries={templateValueEntries}
                 templateValues={templateValues}
                 templatePresetName={templatePreset?.name || ""}
-                onTemplateValueChange={handleTemplateValueChange}
+                onTemplateValueChange={trackChange(handleTemplateValueChange)}
                 shouldShowSpeedTest={shouldShowSpeedTest}
                 baseUrl={baseUrl}
-                onBaseUrlChange={handleClaudeBaseUrlChange}
+                onBaseUrlChange={trackChange(handleClaudeBaseUrlChange)}
                 isEndpointModalOpen={isEndpointModalOpen}
                 onEndpointModalToggle={setIsEndpointModalOpen}
                 onCustomEndpointsChange={
-                  isEditMode ? undefined : setDraftCustomEndpoints
+                  isEditMode ? undefined : trackChange(setDraftCustomEndpoints)
                 }
                 autoSelect={endpointAutoSelect}
-                onAutoSelectChange={setEndpointAutoSelect}
+                onAutoSelectChange={trackChange(setEndpointAutoSelect)}
                 showEndpointTools
                 shouldShowModelSelector={category !== "official"}
                 claudeModel={claudeModel}
@@ -2502,20 +2599,24 @@ function ProviderFormFull({
                 defaultFableModel={defaultFableModel}
                 defaultFableModelName={defaultFableModelName}
                 subagentModel={subagentModel}
-                onModelChange={handleModelChange}
+                onModelChange={trackChange(handleModelChange)}
                 speedTestEndpoints={speedTestEndpoints}
                 apiFormat={localApiFormat}
-                onApiFormatChange={handleApiFormatChange}
+                onApiFormatChange={trackChange(handleApiFormatChange)}
                 apiKeyField={localApiKeyField}
-                onApiKeyFieldChange={handleApiKeyFieldChange}
+                onApiKeyFieldChange={trackChange(handleApiKeyFieldChange)}
                 isFullUrl={localIsFullUrl}
-                onFullUrlChange={setLocalIsFullUrl}
+                onFullUrlChange={trackChange(setLocalIsFullUrl)}
                 customUserAgent={customUserAgent}
-                onCustomUserAgentChange={setCustomUserAgent}
+                onCustomUserAgentChange={trackChange(setCustomUserAgent)}
                 localProxyHeadersOverride={localProxyHeadersOverride}
-                onLocalProxyHeadersOverrideChange={setLocalProxyHeadersOverride}
+                onLocalProxyHeadersOverrideChange={trackChange(
+                  setLocalProxyHeadersOverride,
+                )}
                 localProxyBodyOverride={localProxyBodyOverride}
-                onLocalProxyBodyOverrideChange={setLocalProxyBodyOverride}
+                onLocalProxyBodyOverrideChange={trackChange(
+                  setLocalProxyBodyOverride,
+                )}
               />
               {category !== "official" && (
                 <>
@@ -2528,7 +2629,7 @@ function ProviderFormFull({
                   />
                   <ModelMappingEditor
                     value={form.watch("settingsConfig")}
-                    onChange={handleSettingsConfigChange}
+                    onChange={trackChange(handleSettingsConfigChange)}
                     catalogModels={
                       catalogFilterEnabled
                         ? claudeVendorOnlyModels.length > 0
@@ -2558,9 +2659,9 @@ function ProviderFormFull({
                 }
                 isXaiOauthAuthenticated={isXaiOauthAuthenticated}
                 selectedXaiAccountId={selectedXaiAccountId}
-                onXaiAccountSelect={setSelectedXaiAccountId}
+                onXaiAccountSelect={trackChange(setSelectedXaiAccountId)}
                 codexApiKey={codexApiKey}
-                onApiKeyChange={handleCodexApiKeyChange}
+                onApiKeyChange={trackChange(handleCodexApiKeyChange)}
                 category={category}
                 shouldShowApiKeyLink={shouldShowCodexApiKeyLink}
                 websiteUrl={codexWebsiteUrl}
@@ -2568,7 +2669,7 @@ function ProviderFormFull({
                 partnerPromotionKey={codexPartnerPromotionKey}
                 isCodexOauthPreset={isCodexOfficialProvider}
                 selectedCodexAccountId={selectedCodexAccountId}
-                onCodexAccountSelect={setSelectedCodexAccountId}
+                onCodexAccountSelect={trackChange(setSelectedCodexAccountId)}
                 onCodexAuthSelectionConfirmed={() =>
                   setHasValidCodexOfficialSelection(true)
                 }
@@ -2588,46 +2689,54 @@ function ProviderFormFull({
                 }
                 shouldShowSpeedTest={shouldShowSpeedTest}
                 codexBaseUrl={codexBaseUrl}
-                onBaseUrlChange={handleCodexBaseUrlChange}
+                onBaseUrlChange={trackChange(handleCodexBaseUrlChange)}
                 isFullUrl={localIsFullUrl}
-                onFullUrlChange={setLocalIsFullUrl}
+                onFullUrlChange={trackChange(setLocalIsFullUrl)}
                 isEndpointModalOpen={isCodexEndpointModalOpen}
                 onEndpointModalToggle={setIsCodexEndpointModalOpen}
                 onCustomEndpointsChange={
-                  isEditMode ? undefined : setDraftCustomEndpoints
+                  isEditMode ? undefined : trackChange(setDraftCustomEndpoints)
                 }
                 autoSelect={endpointAutoSelect}
-                onAutoSelectChange={setEndpointAutoSelect}
+                onAutoSelectChange={trackChange(setEndpointAutoSelect)}
                 codexModel={codexModel}
-                onModelChange={handleCodexModelChange}
+                onModelChange={trackChange(handleCodexModelChange)}
                 apiFormat={localCodexApiFormat}
-                onApiFormatChange={handleCodexApiFormatChange}
+                onApiFormatChange={trackChange(handleCodexApiFormatChange)}
                 anthropicAuthField={localCodexAnthropicAuthField}
-                onAnthropicAuthFieldChange={setLocalCodexAnthropicAuthField}
+                onAnthropicAuthFieldChange={trackChange(
+                  setLocalCodexAnthropicAuthField,
+                )}
                 impersonateClaudeCode={localCodexImpersonateClaudeCode}
-                onImpersonateClaudeCodeChange={
-                  setLocalCodexImpersonateClaudeCode
-                }
+                onImpersonateClaudeCodeChange={trackChange(
+                  setLocalCodexImpersonateClaudeCode,
+                )}
                 maxOutputTokens={localCodexMaxOutputTokens}
-                onMaxOutputTokensChange={setLocalCodexMaxOutputTokens}
+                onMaxOutputTokensChange={trackChange(
+                  setLocalCodexMaxOutputTokens,
+                )}
                 codexChatReasoning={codexChatReasoning}
-                onCodexChatReasoningChange={setCodexChatReasoning}
+                onCodexChatReasoningChange={trackChange(setCodexChatReasoning)}
                 promptCacheRouting={promptCacheRouting}
-                onPromptCacheRoutingChange={setPromptCacheRouting}
+                onPromptCacheRoutingChange={trackChange(setPromptCacheRouting)}
                 catalogModels={codexCatalogModels}
-                onCatalogModelsChange={setCodexCatalogModels}
+                onCatalogModelsChange={trackChange(handleCatalogDraftChange)}
                 speedTestEndpoints={speedTestEndpoints}
                 customUserAgent={customUserAgent}
-                onCustomUserAgentChange={setCustomUserAgent}
+                onCustomUserAgentChange={trackChange(setCustomUserAgent)}
                 localProxyHeadersOverride={localProxyHeadersOverride}
-                onLocalProxyHeadersOverrideChange={setLocalProxyHeadersOverride}
+                onLocalProxyHeadersOverrideChange={trackChange(
+                  setLocalProxyHeadersOverride,
+                )}
                 localProxyBodyOverride={localProxyBodyOverride}
-                onLocalProxyBodyOverrideChange={setLocalProxyBodyOverride}
+                onLocalProxyBodyOverrideChange={trackChange(
+                  setLocalProxyBodyOverride,
+                )}
               />
               {category !== "official" && (
                 <ModelMappingEditor
                   value={form.watch("settingsConfig")}
-                  onChange={handleSettingsConfigChange}
+                  onChange={trackChange(handleSettingsConfigChange)}
                   catalogModels={
                     codexCatalogPickerModels.length > 0
                       ? codexCatalogPickerModels
@@ -2643,15 +2752,7 @@ function ProviderFormFull({
                   apiKey={codexApiKey}
                   isFullUrl={localIsFullUrl}
                   apiFormat={localCodexApiFormat}
-                  onSnapshotChange={(snap) => {
-                    if (!snap) return;
-                    // 目录拉回后同步到 Codex 的 modelCatalog 目录（用于生成 model-catalogs.json 与路由 fallback）
-                    const nextCatalog = snap.models.map((m) => ({
-                      model: m.id,
-                      displayName: m.displayName || m.id,
-                    }));
-                    setCodexCatalogModels(nextCatalog as CodexCatalogModel[]);
-                  }}
+                  onSnapshotChange={seedCodexCatalog}
                 />
               )}
             </>
@@ -2665,7 +2766,7 @@ function ProviderFormFull({
                 isEditMode,
               )}
               apiKey={geminiApiKey}
-              onApiKeyChange={handleGeminiApiKeyChange}
+              onApiKeyChange={trackChange(handleGeminiApiKeyChange)}
               category={category}
               shouldShowApiKeyLink={shouldShowGeminiApiKeyLink}
               websiteUrl={geminiWebsiteUrl}
@@ -2673,15 +2774,15 @@ function ProviderFormFull({
               partnerPromotionKey={geminiPartnerPromotionKey}
               shouldShowSpeedTest={shouldShowSpeedTest}
               baseUrl={geminiBaseUrl}
-              onBaseUrlChange={handleGeminiBaseUrlChange}
+              onBaseUrlChange={trackChange(handleGeminiBaseUrlChange)}
               isEndpointModalOpen={isEndpointModalOpen}
               onEndpointModalToggle={setIsEndpointModalOpen}
-              onCustomEndpointsChange={setDraftCustomEndpoints}
+              onCustomEndpointsChange={trackChange(setDraftCustomEndpoints)}
               autoSelect={endpointAutoSelect}
-              onAutoSelectChange={setEndpointAutoSelect}
+              onAutoSelectChange={trackChange(setEndpointAutoSelect)}
               shouldShowModelField={true}
               model={geminiModel}
-              onModelChange={handleGeminiModelChange}
+              onModelChange={trackChange(handleGeminiModelChange)}
               speedTestEndpoints={speedTestEndpoints}
             />
           )}
@@ -2689,24 +2790,32 @@ function ProviderFormFull({
           {appId === "opencode" && !isAnyOmoCategory && (
             <OpenCodeFormFields
               npm={opencodeForm.opencodeNpm}
-              onNpmChange={opencodeForm.handleOpencodeNpmChange}
+              onNpmChange={trackChange(opencodeForm.handleOpencodeNpmChange)}
               apiKey={opencodeForm.opencodeApiKey}
-              onApiKeyChange={opencodeForm.handleOpencodeApiKeyChange}
+              onApiKeyChange={trackChange(
+                opencodeForm.handleOpencodeApiKeyChange,
+              )}
               category={category}
               shouldShowApiKeyLink={shouldShowOpencodeApiKeyLink}
               websiteUrl={opencodeWebsiteUrl}
               isPartner={isOpencodePartner}
               partnerPromotionKey={opencodePartnerPromotionKey}
               baseUrl={opencodeForm.opencodeBaseUrl}
-              onBaseUrlChange={opencodeForm.handleOpencodeBaseUrlChange}
+              onBaseUrlChange={trackChange(
+                opencodeForm.handleOpencodeBaseUrlChange,
+              )}
               headers={opencodeForm.opencodeHeaders}
-              onHeadersChange={opencodeForm.handleOpencodeHeadersChange}
+              onHeadersChange={trackChange(
+                opencodeForm.handleOpencodeHeadersChange,
+              )}
               models={opencodeForm.opencodeModels}
-              onModelsChange={opencodeForm.handleOpencodeModelsChange}
+              onModelsChange={trackChange(
+                opencodeForm.handleOpencodeModelsChange,
+              )}
               extraOptions={opencodeForm.opencodeExtraOptions}
-              onExtraOptionsChange={
-                opencodeForm.handleOpencodeExtraOptionsChange
-              }
+              onExtraOptionsChange={trackChange(
+                opencodeForm.handleOpencodeExtraOptionsChange,
+              )}
             />
           )}
 
@@ -2717,15 +2826,19 @@ function ProviderFormFull({
                 modelVariantsMap={omoModelVariantsMap}
                 presetMetaMap={omoPresetMetaMap}
                 agents={omoDraft.omoAgents}
-                onAgentsChange={omoDraft.setOmoAgents}
+                onAgentsChange={trackChange(omoDraft.setOmoAgents)}
                 categories={
                   category === "omo" ? omoDraft.omoCategories : undefined
                 }
                 onCategoriesChange={
-                  category === "omo" ? omoDraft.setOmoCategories : undefined
+                  category === "omo"
+                    ? trackChange(omoDraft.setOmoCategories)
+                    : undefined
                 }
                 otherFieldsStr={omoDraft.omoOtherFieldsStr}
-                onOtherFieldsStrChange={omoDraft.setOmoOtherFieldsStr}
+                onOtherFieldsStrChange={trackChange(
+                  omoDraft.setOmoOtherFieldsStr,
+                )}
                 isSlim={category === "omo-slim"}
               />
             )}
@@ -2734,20 +2847,28 @@ function ProviderFormFull({
           {appId === "openclaw" && (
             <OpenClawFormFields
               baseUrl={openclawForm.openclawBaseUrl}
-              onBaseUrlChange={openclawForm.handleOpenclawBaseUrlChange}
+              onBaseUrlChange={trackChange(
+                openclawForm.handleOpenclawBaseUrlChange,
+              )}
               apiKey={openclawForm.openclawApiKey}
-              onApiKeyChange={openclawForm.handleOpenclawApiKeyChange}
+              onApiKeyChange={trackChange(
+                openclawForm.handleOpenclawApiKeyChange,
+              )}
               category={category}
               shouldShowApiKeyLink={shouldShowOpenclawApiKeyLink}
               websiteUrl={openclawWebsiteUrl}
               isPartner={isOpenclawPartner}
               partnerPromotionKey={openclawPartnerPromotionKey}
               api={openclawForm.openclawApi}
-              onApiChange={openclawForm.handleOpenclawApiChange}
+              onApiChange={trackChange(openclawForm.handleOpenclawApiChange)}
               models={openclawForm.openclawModels}
-              onModelsChange={openclawForm.handleOpenclawModelsChange}
+              onModelsChange={trackChange(
+                openclawForm.handleOpenclawModelsChange,
+              )}
               userAgent={openclawForm.openclawUserAgent}
-              onUserAgentChange={openclawForm.handleOpenclawUserAgentChange}
+              onUserAgentChange={trackChange(
+                openclawForm.handleOpenclawUserAgentChange,
+              )}
             />
           )}
 
@@ -2755,18 +2876,22 @@ function ProviderFormFull({
           {appId === "hermes" && (
             <HermesFormFields
               baseUrl={hermesForm.hermesBaseUrl}
-              onBaseUrlChange={hermesForm.handleHermesBaseUrlChange}
+              onBaseUrlChange={trackChange(
+                hermesForm.handleHermesBaseUrlChange,
+              )}
               apiKey={hermesForm.hermesApiKey}
-              onApiKeyChange={hermesForm.handleHermesApiKeyChange}
+              onApiKeyChange={trackChange(hermesForm.handleHermesApiKeyChange)}
               category={category}
               shouldShowApiKeyLink={shouldShowHermesApiKeyLink}
               websiteUrl={hermesWebsiteUrl}
               isPartner={isHermesPartner}
               partnerPromotionKey={hermesPartnerPromotionKey}
               apiMode={hermesForm.hermesApiMode}
-              onApiModeChange={hermesForm.handleHermesApiModeChange}
+              onApiModeChange={trackChange(
+                hermesForm.handleHermesApiModeChange,
+              )}
               models={hermesForm.hermesModels}
-              onModelsChange={hermesForm.handleHermesModelsChange}
+              onModelsChange={trackChange(hermesForm.handleHermesModelsChange)}
               rateLimitDelay={hermesForm.hermesRateLimitDelay}
               onRateLimitDelayChange={
                 hermesForm.handleHermesRateLimitDelayChange
@@ -2783,19 +2908,21 @@ function ProviderFormFull({
                 providerName={form.watch("name")}
                 showRemoteCompaction={category !== "official"}
                 isProxyTakeover={isProxyTakeover}
-                onAuthChange={setCodexAuth}
-                onConfigChange={handleCodexConfigChange}
+                onAuthChange={trackChange(setCodexAuth)}
+                onConfigChange={trackChange(handleCodexConfigChange)}
                 useCommonConfig={useCodexCommonConfigFlag}
-                onCommonConfigToggle={handleCodexCommonConfigToggle}
+                onCommonConfigToggle={trackChange(
+                  handleCodexCommonConfigToggle,
+                )}
                 commonConfigSnippet={codexCommonConfigSnippet}
-                onCommonConfigSnippetChange={
-                  handleCodexCommonConfigSnippetChange
-                }
+                onCommonConfigSnippetChange={trackChange(
+                  handleCodexCommonConfigSnippetChange,
+                )}
                 onCommonConfigErrorClear={clearCodexCommonConfigError}
                 commonConfigError={codexCommonConfigError}
                 authError={codexAuthError}
                 configError={codexConfigError}
-                onExtract={handleCodexExtract}
+                onExtract={trackChange(handleCodexExtract)}
                 isExtracting={isCodexExtracting}
               />
               {settingsConfigErrorField}
@@ -2805,19 +2932,21 @@ function ProviderFormFull({
               <GeminiConfigEditor
                 envValue={geminiEnv}
                 configValue={geminiConfig}
-                onEnvChange={handleGeminiEnvChange}
-                onConfigChange={handleGeminiConfigChange}
+                onEnvChange={trackChange(handleGeminiEnvChange)}
+                onConfigChange={trackChange(handleGeminiConfigChange)}
                 useCommonConfig={useGeminiCommonConfigFlag}
-                onCommonConfigToggle={handleGeminiCommonConfigToggle}
+                onCommonConfigToggle={trackChange(
+                  handleGeminiCommonConfigToggle,
+                )}
                 commonConfigSnippet={geminiCommonConfigSnippet}
-                onCommonConfigSnippetChange={
-                  handleGeminiCommonConfigSnippetChange
-                }
+                onCommonConfigSnippetChange={trackChange(
+                  handleGeminiCommonConfigSnippetChange,
+                )}
                 onCommonConfigErrorClear={clearGeminiCommonConfigError}
                 commonConfigError={geminiCommonConfigError}
                 envError={envError}
                 configError={geminiConfigError}
-                onExtract={handleGeminiExtract}
+                onExtract={trackChange(handleGeminiExtract)}
                 isExtracting={isGeminiExtracting}
               />
               {settingsConfigErrorField}
@@ -2845,7 +2974,9 @@ function ProviderFormFull({
                 </Label>
                 <JsonEditor
                   value={form.getValues("settingsConfig")}
-                  onChange={(config) => form.setValue("settingsConfig", config)}
+                  onChange={trackChange((config) =>
+                    form.setValue("settingsConfig", config),
+                  )}
                   placeholder={`{
   "npm": "@ai-sdk/openai-compatible",
   "options": {
@@ -2870,7 +3001,9 @@ function ProviderFormFull({
                 </Label>
                 <JsonEditor
                   value={form.getValues("settingsConfig")}
-                  onChange={(config) => form.setValue("settingsConfig", config)}
+                  onChange={trackChange((config) =>
+                    form.setValue("settingsConfig", config),
+                  )}
                   placeholder={
                     appId === "hermes"
                       ? `{
@@ -2905,16 +3038,20 @@ function ProviderFormFull({
             <>
               <CommonConfigEditor
                 value={form.getValues("settingsConfig")}
-                onChange={(value) => form.setValue("settingsConfig", value)}
+                onChange={trackChange((value) =>
+                  form.setValue("settingsConfig", value),
+                )}
                 useCommonConfig={useCommonConfig}
-                onCommonConfigToggle={handleCommonConfigToggle}
+                onCommonConfigToggle={trackChange(handleCommonConfigToggle)}
                 commonConfigSnippet={commonConfigSnippet}
-                onCommonConfigSnippetChange={handleCommonConfigSnippetChange}
+                onCommonConfigSnippetChange={trackChange(
+                  handleCommonConfigSnippetChange,
+                )}
                 commonConfigError={commonConfigError}
                 onEditClick={() => setIsCommonConfigModalOpen(true)}
                 isModalOpen={isCommonConfigModalOpen}
                 onModalClose={() => setIsCommonConfigModalOpen(false)}
-                onExtract={handleClaudeExtract}
+                onExtract={trackChange(handleClaudeExtract)}
                 isExtracting={isClaudeExtracting}
               />
               {settingsConfigErrorField}
@@ -2927,7 +3064,7 @@ function ProviderFormFull({
             !isAnyOmoCategory && (
               <ProviderRequestBudgetFields
                 value={requestBudget}
-                onChange={setRequestBudget}
+                onChange={trackChange(setRequestBudget)}
               />
             )}
 
@@ -2937,7 +3074,7 @@ function ProviderFormFull({
             appId !== "hermes" && (
               <ProviderAdvancedConfig
                 pricingConfig={pricingConfig}
-                onPricingConfigChange={setPricingConfig}
+                onPricingConfigChange={trackChange(setPricingConfig)}
               />
             )}
 

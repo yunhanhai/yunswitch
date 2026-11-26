@@ -5,7 +5,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AddProviderDialog } from "@/components/providers/AddProviderDialog";
 import type { ProviderFormValues } from "@/components/providers/forms/ProviderForm";
@@ -32,6 +32,10 @@ vi.mock("@/components/ui/dialog", () => ({
   ),
 }));
 
+vi.mock("@/components/universal", () => ({
+  UniversalProviderPanel: () => <div>synthetic shared channel panel</div>,
+}));
+
 let mockFormValues: ProviderFormValues;
 let mockFormReady = true;
 let submitReadyCallbacks: Array<(isReady: boolean) => void> = [];
@@ -41,11 +45,14 @@ vi.mock("@/components/providers/forms/ProviderForm", () => ({
     onSubmit,
     onSubmitReadyChange,
     onManageAuthAccounts,
+    onDirtyChange,
   }: {
     onSubmit: (values: ProviderFormValues) => void;
     onSubmitReadyChange?: (isReady: boolean) => void;
+    onDirtyChange?: (dirty: boolean) => void;
     onManageAuthAccounts?: (target: "codex_oauth") => void;
   }) => {
+    const [draft, setDraft] = useState("");
     useEffect(() => {
       if (onSubmitReadyChange) {
         submitReadyCallbacks.push(onSubmitReadyChange);
@@ -60,6 +67,14 @@ vi.mock("@/components/providers/forms/ProviderForm", () => ({
           onSubmit(mockFormValues);
         }}
       >
+        <input
+          aria-label="synthetic draft"
+          value={draft}
+          onChange={(event) => {
+            setDraft(event.target.value);
+            onDirtyChange?.(true);
+          }}
+        />
         <button
           type="button"
           onClick={() => onManageAuthAccounts?.("codex_oauth")}
@@ -347,5 +362,90 @@ context_window = 500000
 
     act(() => staleCallback?.(true));
     expect(reopenedButton).toBeDisabled();
+  });
+});
+
+describe("AddProviderDialog draft sessions", () => {
+  beforeEach(() => { mockFormReady = true; submitReadyCallbacks = []; });
+  it("retains the form while visiting shared channels, then explicitly discards it", async () => {
+    const close = vi.fn();
+    const props = {
+      onOpenChange: close,
+      appId: "claude" as const,
+      onSubmit: vi.fn(),
+    };
+    const { rerender } = render(<AddProviderDialog open {...props} />);
+    fireEvent.change(screen.getByLabelText("synthetic draft"), {
+      target: { value: "unsaved fake key" },
+    });
+    fireEvent.mouseDown(
+      screen.getByRole("tab", { name: "provider.tabUniversal" }),
+      { button: 0, ctrlKey: false },
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("synthetic draft")).not.toBeVisible(),
+    );
+    fireEvent.mouseDown(
+      screen.getByRole("tab", { name: /provider.tabProvider/ }),
+      { button: 0, ctrlKey: false },
+    );
+    expect(screen.getByLabelText("synthetic draft")).toHaveValue(
+      "unsaved fake key",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "common.cancel" }));
+    expect(close).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "providerDraft.keep" }));
+    expect(screen.getByLabelText("synthetic draft")).toHaveValue(
+      "unsaved fake key",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "common.cancel" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "providerDraft.discard" }),
+    );
+    expect(close).toHaveBeenCalledWith(false);
+    rerender(<AddProviderDialog open={false} {...props} />);
+    rerender(<AddProviderDialog open {...props} />);
+    expect(screen.getByLabelText("synthetic draft")).toHaveValue("");
+  });
+
+  it("does not let a pending save dismiss a newly opened session", async () => {
+    let finish!: () => void;
+    const close = vi.fn();
+    const props = {
+      onOpenChange: close,
+      appId: "claude" as const,
+      onSubmit: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          }),
+      ),
+    };
+    mockFormValues = {
+      name: "Synthetic",
+      websiteUrl: "",
+      settingsConfig: "{}",
+    };
+    const { rerender } = render(<AddProviderDialog open {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "common.add" }));
+    await waitFor(() => expect(props.onSubmit).toHaveBeenCalledTimes(1));
+    expect(
+      screen.getByRole("button", { name: "common.cancel" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("tab", { name: "provider.tabUniversal" }),
+    ).toBeDisabled();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(close).not.toHaveBeenCalled();
+    rerender(<AddProviderDialog open={false} {...props} />);
+    rerender(<AddProviderDialog open {...props} />);
+    fireEvent.change(screen.getByLabelText("synthetic draft"), {
+      target: { value: "next session" },
+    });
+    await act(async () => finish());
+    expect(close).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("synthetic draft")).toHaveValue(
+      "next session",
+    );
   });
 });

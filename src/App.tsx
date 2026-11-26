@@ -757,7 +757,8 @@ function App() {
     originalId?: string;
   }) => {
     await updateProvider(provider, originalId);
-    setEditingProvider(null);
+    // The editing session closes itself after success. A late save must not
+    // dismiss a different session opened while this operation was pending.
   };
 
   const handleConfirmAction = async () => {

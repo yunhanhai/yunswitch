@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Loader2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ProviderDraftGuard } from "./ProviderDraftGuard";
 import { FullScreenPanel } from "@/components/common/FullScreenPanel";
 import type { Provider, CustomEndpoint } from "@/types";
 import type { AppId } from "@/lib/api";
@@ -36,7 +37,13 @@ interface AddProviderDialogProps {
   ) => Promise<void> | void;
 }
 
-export function AddProviderDialog({
+export function AddProviderDialog(props: AddProviderDialogProps) {
+  return props.open ? (
+    <AddProviderSession key={props.appId} {...props} />
+  ) : null;
+}
+
+function AddProviderSession({
   open,
   onOpenChange,
   appId,
@@ -55,7 +62,18 @@ export function AddProviderDialog({
     "app-specific",
   );
   const [isFormSubmitting, setIsFormSubmitting] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [sharedFormOpen, setSharedFormOpen] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const [discardOpen, setDiscardOpen] = useState(false);
+  const submitting = useRef(false);
+  const active = useRef(true);
+  useEffect(() => {
+    active.current = true;
+    return () => {
+      active.current = false;
+    };
+  }, []);
   const [authSettingsTarget, setAuthSettingsTarget] =
     useState<ManagedAuthProvider | null>(null);
 
@@ -69,14 +87,23 @@ export function AddProviderDialog({
   }, [onOpenChange]);
 
   const handlePanelClose = useCallback(() => {
+    if (submitting.current || discardOpen) return;
     // The nested shared-channel form handles its own back/escape action.
     if (sharedFormOpen) return;
     if (authSettingsTarget) {
       setAuthSettingsTarget(null);
       return;
     }
-    closeDialog();
-  }, [authSettingsTarget, closeDialog, sharedFormOpen]);
+    if (isDirty) setDiscardOpen(true);
+    else closeDialog();
+  }, [
+    authSettingsTarget,
+    closeDialog,
+    sharedFormOpen,
+    isDirty,
+    isFormSubmitting,
+    discardOpen,
+  ]);
   const formReadyToken = useMemo(
     () => Symbol("provider-form-ready"),
     [appId, open],
@@ -297,8 +324,16 @@ export function AddProviderDialog({
         providerData.suggestedDefaults = values.suggestedDefaults;
       }
 
-      await onSubmit(providerData);
-      closeDialog();
+      if (submitting.current) return;
+      submitting.current = true;
+      setIsSaving(true);
+      try {
+        await onSubmit(providerData);
+        if (active.current) closeDialog();
+      } finally {
+        submitting.current = false;
+        if (active.current) setIsSaving(false);
+      }
     },
     [appId, onSubmit, closeDialog],
   );
@@ -311,7 +346,8 @@ export function AddProviderDialog({
         </span>
         <Button
           variant="outline"
-          onClick={closeDialog}
+          onClick={handlePanelClose}
+          disabled={isSaving}
           className="border-border/20 hover:bg-accent hover:text-accent-foreground"
         >
           {t("common.cancel")}
@@ -319,7 +355,7 @@ export function AddProviderDialog({
         <Button
           type="submit"
           form="provider-form"
-          disabled={isFormSubmitting || !isFormReady}
+          disabled={isSaving || isFormSubmitting || !isFormReady}
           className="bg-primary text-primary-foreground hover:bg-primary/90"
         >
           {isFormSubmitting ? (
@@ -334,7 +370,8 @@ export function AddProviderDialog({
       <>
         <Button
           variant="outline"
-          onClick={closeDialog}
+          onClick={handlePanelClose}
+          disabled={isSaving}
           className="border-border/20 hover:bg-accent hover:text-accent-foreground"
         >
           {t("common.cancel")}
@@ -353,18 +390,31 @@ export function AddProviderDialog({
       {showUniversalTab ? (
         <Tabs
           value={activeTab}
-          onValueChange={(v) => setActiveTab(v as "app-specific" | "universal")}
+          onValueChange={(v) => {
+            if (!submitting.current) {
+              setActiveTab(v as "app-specific" | "universal");
+            }
+          }}
         >
           <TabsList className="grid w-full grid-cols-2 mb-6">
-            <TabsTrigger value="app-specific">
+            <TabsTrigger value="app-specific" disabled={isSaving}>
               {t(`apps.${appId}`)} {t("provider.tabProvider")}
             </TabsTrigger>
-            <TabsTrigger value="universal" data-testid="shared-channel-tab">
+            <TabsTrigger
+              value="universal"
+              data-testid="shared-channel-tab"
+              disabled={isSaving}
+            >
               {t("provider.tabUniversal")}
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="app-specific" className="mt-0">
+          <TabsContent
+            value="app-specific"
+            forceMount
+            hidden={activeTab !== "app-specific"}
+            className="mt-0 data-[state=inactive]:hidden"
+          >
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 p-3">
               <p className="text-sm text-muted-foreground">
                 {t("universalProvider.addPrompt")}
@@ -372,6 +422,7 @@ export function AddProviderDialog({
               <Button
                 variant="outline"
                 size="sm"
+                disabled={isSaving}
                 onClick={() => setActiveTab("universal")}
               >
                 {t("universalProvider.title")}
@@ -381,7 +432,8 @@ export function AddProviderDialog({
               appId={appId}
               submitLabel={t("common.add")}
               onSubmit={handleSubmit}
-              onCancel={closeDialog}
+              onCancel={handlePanelClose}
+              onDirtyChange={setIsDirty}
               onManageAuthAccounts={setAuthSettingsTarget}
               onSubmittingChange={setIsFormSubmitting}
               onSubmitReadyChange={handleSubmitReadyChange}
@@ -406,7 +458,8 @@ export function AddProviderDialog({
           appId={appId}
           submitLabel={t("common.add")}
           onSubmit={handleSubmit}
-          onCancel={closeDialog}
+          onCancel={handlePanelClose}
+          onDirtyChange={setIsDirty}
           onManageAuthAccounts={setAuthSettingsTarget}
           onSubmittingChange={setIsFormSubmitting}
           onSubmitReadyChange={handleSubmitReadyChange}
@@ -414,6 +467,14 @@ export function AddProviderDialog({
         />
       )}
 
+      <ProviderDraftGuard
+        open={discardOpen}
+        onKeep={() => setDiscardOpen(false)}
+        onDiscard={() => {
+          setDiscardOpen(false);
+          closeDialog();
+        }}
+      />
       <AuthSettingsPanel
         target={authSettingsTarget}
         onClose={() => setAuthSettingsTarget(null)}

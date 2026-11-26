@@ -14,6 +14,7 @@ import { exerciseProviderBudgets } from "./windows-provider-budget-smoke.mjs";
 import { exerciseStreamSafety } from "./windows-stream-safety-smoke.mjs";
 import { exerciseRequestCompletion } from "./windows-completion-smoke.mjs";
 import { exerciseSharedChannels } from "./windows-shared-channel-smoke.mjs";
+import { exerciseProviderDrafts } from "./windows-provider-draft-smoke.mjs";
 import { exerciseLinkedChannels } from "./windows-link-channel-smoke.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -693,8 +694,15 @@ async function exerciseModelCatalog(cdp, label) {
       window.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
     })()`);
     await until(
-      () => cdp.evaluate("!document.getElementById('baseUrl')"),
-      "close provider form without saving",
+      () =>
+        cdp.evaluate(`(() => {
+        if (!document.getElementById('baseUrl')) return true;
+        const discard = [...document.querySelectorAll('[role="dialog"] button')]
+          .find(button => /^(Discard changes|放弃修改)$/.test(button.textContent.trim()));
+        discard?.click();
+        return false;
+      })()`),
+      "confirm discard and close provider form without saving",
     );
   };
 
@@ -1172,6 +1180,7 @@ async function verifyUpgrade(previous, current, installedExe, portableExe) {
   await exerciseRequestCompletion(cdp, { check, until, label: "upgraded MSI" });
   await exerciseSharedChannels(cdp, { check, until, label: "upgraded MSI" });
   await exerciseLinkedChannels(cdp, { check, until, label: "upgraded MSI" });
+  await exerciseProviderDrafts(cdp, { check, until, label: "upgraded MSI" });
   await cdp.screenshot("installed-after-upgrade.png");
   await exitApp();
   check(
@@ -1358,6 +1367,7 @@ async function main() {
   await exerciseRequestCompletion(cdp, { check, until, label: "portable" });
   await exerciseSharedChannels(cdp, { check, until, label: "portable" });
   await exerciseLinkedChannels(cdp, { check, until, label: "portable" });
+  await exerciseProviderDrafts(cdp, { check, until, label: "portable" });
   await exitApp();
   // A fresh installation may create tool directories. They must remain inside
   // this disposable runner profile; the upstream app database stays absent.

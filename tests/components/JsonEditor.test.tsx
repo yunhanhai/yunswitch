@@ -1,4 +1,4 @@
-import { act, render } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { EditorView } from "@codemirror/view";
 import { describe, expect, it, vi } from "vitest";
 
@@ -53,6 +53,34 @@ describe("JsonEditor", () => {
 
     expect(firstOnChange).not.toHaveBeenCalled();
     expect(secondOnChange).toHaveBeenLastCalledWith('{"changed":true}');
+  });
+
+  it("hydrates external values without reporting user edits but reports typing and formatting", () => {
+    const changed = vi.fn();
+    const { container, rerender } = render(
+      <JsonEditor value="" onChange={changed} />,
+    );
+    rerender(<JsonEditor value='{"fake":"fixture"}' onChange={changed} />);
+    const view = EditorView.findFromDOM(
+      container.querySelector(".cm-content") as HTMLElement,
+    )!;
+    expect(view.state.doc.toString()).toBe('{"fake":"fixture"}');
+    expect(changed).not.toHaveBeenCalled();
+    act(() =>
+      view.dispatch({
+        changes: {
+          from: 0,
+          to: view.state.doc.length,
+          insert: '{"typed":true}',
+        },
+      }),
+    );
+    expect(changed).toHaveBeenLastCalledWith('{"typed":true}');
+    changed.mockClear();
+    const format = screen.getByRole("button");
+    fireEvent.click(format);
+    expect(changed).toHaveBeenCalledOnce();
+    expect(JSON.parse(changed.mock.calls[0][0])).toEqual({ typed: true });
   });
 
   it("keeps the cursor near the edited region when external normalization adds text", () => {
