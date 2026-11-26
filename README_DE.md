@@ -28,6 +28,8 @@ Das Projekt wird **eigenständig von yunhanhai gepflegt** und basiert auf [CC Sw
 
 ## Download und Einstieg
 
+**Nächste Version in Vorbereitung:** [`3.20.1-yunswitch.9`](docs/releases/3.20.1-yunswitch.9.md) bündelt gemeinsame Kanäle für Claude Code und Codex, die Verknüpfung vorhandener Konfigurationen, bereinigte Anfragediagnosen und Informationen zur Build-Herkunft in einem neuen Windows-Paket. Die Prüfung dieses Pakets und des Upgrades von `.8` steht noch aus; die öffentlichen Downloads unten bleiben bei `.8`.
+
 Aktuelle Version: **`3.20.1-yunswitch.8` als Windows-x64-Vorabversion**, mit MSI-Installer und portabler ZIP.
 
 | Plattform     | Bezug und Prüfstand                                                                                                                                                                                                            |
@@ -107,7 +109,7 @@ Alternativ von `https://github.com/yunhanhai/yunswitch.git` klonen. Die Entwickl
 
 Das Projekt wird derzeit von einer Person gepflegt. Fragen und Vorschläge über [Gitee Issues](https://gitee.com/yunhanhai/yunswitch/issues) oder [GitHub Issues](https://github.com/yunhanhai/yunswitch/issues) einreichen. Codebeiträge beschreibt [CONTRIBUTING.md](CONTRIBUTING.md), Sicherheitsberichte [SECURITY.md](SECURITY.md).
 
-Als Nächstes folgen bereinigte Anfragediagnosen und verständliche Wartezustände, danach echte Anbieter und lange Sitzungen, Protokollszenarien und Plattform-Releases. Reihenfolge und Abnahmekriterien stehen im [Entwicklungsplan](docs/DEVELOPMENT-ROADMAP.md).
+Anfragediagnosen und gemeinsame Kanäle sind implementiert und haben ihre jeweiligen Quellcode- und Build-only-Prüfungen bestanden. Zunächst wird `.9` mit erkennbarer Build-Herkunft geprüft und veröffentlicht. Danach folgen gezielte Verbesserungen am Schutz von Formularentwürfen sowie Prüfungen mit echten Anbietern und langen Sitzungen. Umfang und Abnahmekriterien stehen im [Entwicklungsplan](docs/DEVELOPMENT-ROADMAP.md).
 
 ## Herkunft und Lizenz
 

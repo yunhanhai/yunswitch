@@ -28,6 +28,8 @@ YunSwitch 帮助你管理 Claude Code、Codex、Gemini CLI 等工具的供应商
 
 ## 下载与快速开始
 
+**新版本准备中：**[`3.20.1-yunswitch.9`](docs/releases/3.20.1-yunswitch.9.md) 将共享 Claude Code / Codex 渠道、关联已有配置、脱敏请求诊断和构建来源纳入新的 Windows 安装包。新包及 `.8` 升级验收仍待完成，下方公开下载保持为 `.8`。
+
 当前版本：**`3.20.1-yunswitch.8` Windows x64 预发布**，提供 MSI 安装版与免安装 ZIP。
 
 | 平台          | 获取方式与验证状态                                                                                                                                                                                            |
@@ -130,7 +132,7 @@ GitHub 也可以作为克隆来源：`https://github.com/yunhanhai/yunswitch.git
 
 本项目目前由一人维护，欢迎通过 [Gitee Issues](https://gitee.com/yunhanhai/yunswitch/issues) 或 [GitHub Issues](https://github.com/yunhanhai/yunswitch/issues) 提交问题与建议。代码贡献见[贡献指南](CONTRIBUTING.md)，安全问题按[安全政策](SECURITY.md)联系维护者。
 
-下一阶段优先补齐脱敏请求诊断与等待状态，再验证真实供应商、长会话、协议转换和平台发布。具体顺序与完成标准见[开发路线](docs/DEVELOPMENT-ROADMAP.md)。
+请求诊断与共享渠道已实现，并分别完成源码和 build-only 包验收。当前先验证并发布带有可识别构建来源的 `.9`，随后按独立场景完善表单草稿保护、真实供应商及长会话验证。范围与完成标准见[开发路线](docs/DEVELOPMENT-ROADMAP.md)。
 
 ## 来源与许可证
 

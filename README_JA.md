@@ -28,6 +28,8 @@ YunSwitch は Claude Code、Codex、Gemini CLI などのプロバイダー設定
 
 ## ダウンロードとクイックスタート
 
+**次のバージョンを準備中：**[`3.20.1-yunswitch.9`](docs/releases/3.20.1-yunswitch.9.md) では Claude Code / Codex 共通チャネル、既存設定の関連付け、機密情報を除いたリクエスト診断、ビルド元情報を新しい Windows パッケージに含めます。新パッケージと `.8` からのアップグレード検証は未完了のため、以下の公開ダウンロードは引き続き `.8` です。
+
 現在のバージョン：**`3.20.1-yunswitch.8` Windows x64 プレビュー版**。MSI インストーラーとポータブル ZIP を公開しています。
 
 | プラットフォーム | 入手方法と検証状況                                                                                                                                                                                                                       |
@@ -107,7 +109,7 @@ GitHub からも `https://github.com/yunhanhai/yunswitch.git` をクローンで
 
 現在は一人で保守しています。[Gitee Issues](https://gitee.com/yunhanhai/yunswitch/issues) または [GitHub Issues](https://github.com/yunhanhai/yunswitch/issues)で問題や提案を受け付けます。コードの貢献は[貢献ガイド](CONTRIBUTING.md)、セキュリティ報告は[セキュリティ方針](SECURITY.md)を参照してください。
 
-次は匿名化したリクエスト診断と待機状態を整備し、実プロバイダー・長いセッション、プロトコル、各プラットフォームの検証へ進めます。[開発計画](docs/DEVELOPMENT-ROADMAP.md)に順序と完了条件を記載しています。
+リクエスト診断と共通チャネルは実装済みで、各段階のソース検査と公開前パッケージ検証を完了しています。現在はビルド元を識別できる `.9` の検証と公開を進め、その後はフォームの編集中データ保護、実プロバイダーと長いセッションを個別に検証します。範囲と完了条件は[開発計画](docs/DEVELOPMENT-ROADMAP.md)を参照してください。
 
 ## 出典とライセンス
 

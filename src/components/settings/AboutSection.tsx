@@ -42,6 +42,7 @@ import { isWindows } from "@/lib/platform";
 import { isUpdateAvailable } from "@/lib/version";
 import { ToolUpgradeConfirmDialog } from "./ToolUpgradeConfirmDialog";
 import { ToolInstallRow } from "./ToolInstallRow";
+import { BuildInfoSection } from "./BuildInfoSection";
 
 interface AboutSectionProps {
   isPortable: boolean;
@@ -985,6 +986,8 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
             </Button>
           </div>
         </div>
+
+        <BuildInfoSection />
 
         {hasUpdate && updateInfo && (
           <motion.div

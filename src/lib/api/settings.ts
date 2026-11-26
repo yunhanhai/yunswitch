@@ -35,7 +35,17 @@ export interface RuntimeDirectoryIdentity {
   isolatedConfigRoot: string | null;
 }
 
+export interface BuildInfo {
+  version: string;
+  sourceCommit: string | null;
+  target: string;
+}
+
 export const settingsApi = {
+  async getBuildInfo(): Promise<BuildInfo> {
+    return await invoke("get_build_info");
+  },
+
   async get(): Promise<Settings> {
     return await invoke("get_settings");
   },

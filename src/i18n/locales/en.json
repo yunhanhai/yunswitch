@@ -872,6 +872,17 @@
     "checking": "Checking...",
     "upToDate": "Up to Date",
     "aboutHint": "View version information and update status.",
+    "buildInfo": {
+      "title": "Build information",
+      "source": "Source commit",
+      "sourceUnknown": "Not recorded (local build)",
+      "target": "Target platform",
+      "copy": "Copy build information",
+      "copyHint": "Copies only the version, full source commit (or null if not recorded), and target platform.",
+      "copied": "Build information copied.",
+      "copyFailed": "Could not copy build information.",
+      "loadFailed": "Could not load build information. Reopen About to retry."
+    },
     "portableMode": "Portable mode: updates require manual download.",
     "updateAvailable": "New version available: {{version}}",
     "updateBadge": "Update available",
