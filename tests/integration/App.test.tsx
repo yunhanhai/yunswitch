@@ -327,6 +327,53 @@ describe("App integration with MSW", () => {
     });
   });
 
+  it("does not expose previous-client provider rows while the next client is loading", async () => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.post("http://tauri.local/get_providers", async ({ request }) => {
+        const { app } = (await request.json()) as { app: string };
+        if (app === "codex") {
+          await pending;
+          return HttpResponse.json({
+            "codex-next": {
+              id: "codex-next",
+              name: "Codex next",
+              settingsConfig: {},
+            },
+          });
+        }
+        return HttpResponse.json({
+          "claude-old": {
+            id: "claude-old",
+            name: "Claude old",
+            settingsConfig: { env: {} },
+          },
+        });
+      }),
+    );
+    renderApp(App);
+    await waitFor(() =>
+      expect(screen.getByTestId("provider-list")).toHaveTextContent(
+        "claude-old",
+      ),
+    );
+    fireEvent.click(screen.getByText("switch-codex"));
+    await waitFor(() =>
+      expect(screen.getByTestId("provider-list")).not.toHaveTextContent(
+        "claude-old",
+      ),
+    );
+    release();
+    await waitFor(() =>
+      expect(screen.getByTestId("provider-list")).toHaveTextContent(
+        "codex-next",
+      ),
+    );
+  });
+
   it("duplicates openclaw providers with a generated key that avoids live-only ids", async () => {
     setProviders("openclaw", {
       deepseek: {

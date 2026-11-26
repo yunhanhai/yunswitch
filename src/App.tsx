@@ -308,12 +308,21 @@ function App() {
     return target?.provider_id;
   }, [proxyStatus?.active_targets, proxyAppId]);
 
-  const { data, isLoading, refetch } = useProvidersQuery(activeApp, {
-    isProxyRunning: currentAppUsesProxy && isProxyRunning,
-  });
+  const { data, isLoading, isPlaceholderData, refetch } = useProvidersQuery(
+    activeApp,
+    {
+      isProxyRunning: currentAppUsesProxy && isProxyRunning,
+    },
+  );
   const { data: piCurrentState } = usePiCurrentState(activeApp === "pi");
-  const providers = useMemo(() => data?.providers ?? {}, [data]);
-  const currentProviderId = data?.currentProviderId ?? "";
+  // Previous-app placeholder rows must never be editable under the new app ID.
+  const providers = useMemo(
+    () => (isPlaceholderData ? {} : (data?.providers ?? {})),
+    [data, isPlaceholderData],
+  );
+  const currentProviderId = isPlaceholderData
+    ? ""
+    : (data?.currentProviderId ?? "");
   const isOpenClawView =
     activeApp === "openclaw" &&
     (currentView === "providers" ||
@@ -1275,7 +1284,7 @@ function App() {
                       providers={providers}
                       currentProviderId={currentProviderId}
                       appId={activeApp}
-                      isLoading={isLoading}
+                      isLoading={isLoading || isPlaceholderData}
                       isProxyRunning={currentAppUsesProxy && isProxyRunning}
                       // 健康轮询只关心代理进程本身，不要被 currentAppUsesProxy
                       // 短路：否则非代理应用的卡片永远拿不到实时熔断/冷却状态。
