@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { exerciseCodexCompatibility } from "./windows-codex-compat-smoke.mjs";
 import { exerciseProviderBudgets } from "./windows-provider-budget-smoke.mjs";
 import { exerciseStreamSafety } from "./windows-stream-safety-smoke.mjs";
+import { exerciseRequestCompletion } from "./windows-completion-smoke.mjs";
 
 const execFileAsync = promisify(execFile);
 const args = Object.fromEntries(
@@ -1082,6 +1083,7 @@ async function verifyUpgrade(previous, current, installedExe, portableExe) {
     label: "upgraded MSI",
   });
   await exerciseStreamSafety(cdp, { check, until, label: "upgraded MSI" });
+  await exerciseRequestCompletion(cdp, { check, until, label: "upgraded MSI" });
   await cdp.screenshot("installed-after-upgrade.png");
   await exitApp();
   check(
@@ -1259,6 +1261,7 @@ async function main() {
   await exerciseProviderBudgets(cdp, { check, until, label: "portable" });
   await exerciseCodexCompatibility(cdp, { check, until, label: "portable" });
   await exerciseStreamSafety(cdp, { check, until, label: "portable" });
+  await exerciseRequestCompletion(cdp, { check, until, label: "portable" });
   await exitApp();
   // A fresh installation may create tool directories. They must remain inside
   // this disposable runner profile; the upstream app database stays absent.

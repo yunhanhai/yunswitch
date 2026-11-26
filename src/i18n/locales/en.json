@@ -2880,7 +2880,11 @@
         "activeConnections": "Active Connections",
         "totalRequests": "Total Requests",
         "successRate": "Success Rate",
-        "uptime": "Uptime"
+        "uptime": "Uptime",
+        "noResults": "No results yet",
+        "requestResults": "Request outcomes",
+        "pendingRequests": "In progress",
+        "successRateScope": "Success rate = succeeded ÷ (succeeded + failed + timed out). Requests in progress, cancelled requests and unconfirmed outcomes are excluded. Each request is counted once when it ends."
       }
     },
     "settings": {
@@ -3113,7 +3117,8 @@
         "succeeded": "Succeeded",
         "failed": "Failed",
         "cancelled": "Cancelled",
-        "timedOut": "Timed out"
+        "timedOut": "Timed out",
+        "unconfirmed": "Unconfirmed outcome"
       },
       "reasons": {
         "retryAfter": "Upstream Retry-After",
@@ -3125,7 +3130,9 @@
         "requestCorrection": "Retrying after request correction",
         "proxyStopped": "Proxy stopped",
         "clientDisconnected": "Client disconnected",
-        "upstreamCancelled": "Upstream cancelled the response"
+        "upstreamCancelled": "Upstream cancelled the response",
+        "observationLimit": "Response exceeded the observation limit; completion could not be confirmed",
+        "unsupportedResponse": "Response format or encoding does not support outcome verification"
       },
       "errors": {
         "rateLimited": "Rate limit",

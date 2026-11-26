@@ -9,7 +9,7 @@
 
 use super::{
     content_encoding::{decompress_body, get_content_encoding, is_supported_content_encoding},
-    diagnostics::{self, DiagnosticError},
+    diagnostics::{self, DiagnosticError, ExpectedCandidates, ResponseProtocol},
     error_mapper::{get_error_message, map_proxy_error_to_status},
     forwarder::ActiveConnectionGuard,
     handler_config::{
@@ -71,7 +71,8 @@ pub async fn health_check() -> (StatusCode, Json<Value>) {
 
 /// 获取服务状态
 pub async fn get_status(State(state): State<ProxyState>) -> Result<Json<ProxyStatus>, ProxyError> {
-    let status = state.status.read().await.clone();
+    let mut status = state.status.read().await.clone();
+    state.diagnostics.apply_status(&mut status);
     Ok(Json(status))
 }
 
@@ -128,9 +129,15 @@ pub async fn handle_messages(
     State(state): State<ProxyState>,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
-    diagnostics::track(state.diagnostics.clone(), "claude", request, |request| {
-        handle_messages_for_app(state, request, AppType::Claude, "Claude", "claude", None)
-    })
+    diagnostics::track(
+        state.diagnostics.clone(),
+        "claude",
+        ResponseProtocol::Messages,
+        request,
+        |request| {
+            handle_messages_for_app(state, request, AppType::Claude, "Claude", "claude", None)
+        },
+    )
     .await
 }
 
@@ -141,6 +148,7 @@ pub async fn handle_claude_desktop_messages(
     diagnostics::track(
         state.diagnostics.clone(),
         "claude-desktop",
+        ResponseProtocol::Messages,
         request,
         |request| async move {
             validate_claude_desktop_gateway_auth(&state, request.headers())?;
@@ -774,9 +782,13 @@ pub async fn handle_chat_completions(
     State(state): State<ProxyState>,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
-    diagnostics::track(state.diagnostics.clone(), "codex", request, |request| {
-        handle_chat_completions_request(state, request)
-    })
+    diagnostics::track(
+        state.diagnostics.clone(),
+        "codex",
+        ResponseProtocol::Chat,
+        request,
+        |request| handle_chat_completions_request(state, request),
+    )
     .await
 }
 
@@ -807,6 +819,11 @@ async fn handle_chat_completions_request(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
+    let expected_candidates = body
+        .get("n")
+        .and_then(Value::as_u64)
+        .map(|count| usize::try_from(count).unwrap_or(usize::MAX))
+        .unwrap_or(1);
     let forwarder = ctx.create_forwarder(&state);
     let mut result = match forwarder
         .forward_with_retry(
@@ -835,14 +852,18 @@ async fn handle_chat_completions_request(
     ctx.provider = result.provider;
     let response = result.response;
 
-    process_response(
+    let mut response = process_response(
         response,
         &ctx,
         &state,
         &OPENAI_PARSER_CONFIG,
         connection_guard,
     )
-    .await
+    .await?;
+    response
+        .extensions_mut()
+        .insert(ExpectedCandidates(expected_candidates));
+    Ok(response)
 }
 
 /// 处理 /v1/responses 请求（OpenAI Responses API - Codex CLI 透传）
@@ -850,9 +871,13 @@ pub async fn handle_responses(
     State(state): State<ProxyState>,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
-    diagnostics::track(state.diagnostics.clone(), "codex", request, |request| {
-        handle_responses_for_app(state, request, AppType::Codex, "Codex", "codex")
-    })
+    diagnostics::track(
+        state.diagnostics.clone(),
+        "codex",
+        ResponseProtocol::Responses,
+        request,
+        |request| handle_responses_for_app(state, request, AppType::Codex, "Codex", "codex"),
+    )
     .await
 }
 
@@ -860,15 +885,21 @@ pub async fn handle_grokbuild_responses(
     State(state): State<ProxyState>,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
-    diagnostics::track(state.diagnostics.clone(), "grokbuild", request, |request| {
-        handle_responses_for_app(
-            state,
-            request,
-            AppType::GrokBuild,
-            "Grok Build",
-            "grokbuild",
-        )
-    })
+    diagnostics::track(
+        state.diagnostics.clone(),
+        "grokbuild",
+        ResponseProtocol::Responses,
+        request,
+        |request| {
+            handle_responses_for_app(
+                state,
+                request,
+                AppType::GrokBuild,
+                "Grok Build",
+                "grokbuild",
+            )
+        },
+    )
     .await
 }
 
@@ -992,9 +1023,15 @@ pub async fn handle_responses_compact(
     State(state): State<ProxyState>,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
-    diagnostics::track(state.diagnostics.clone(), "codex", request, |request| {
-        handle_responses_compact_for_app(state, request, AppType::Codex, "Codex", "codex")
-    })
+    diagnostics::track(
+        state.diagnostics.clone(),
+        "codex",
+        ResponseProtocol::Http,
+        request,
+        |request| {
+            handle_responses_compact_for_app(state, request, AppType::Codex, "Codex", "codex")
+        },
+    )
     .await
 }
 
@@ -1008,9 +1045,13 @@ pub async fn handle_alpha_search(
     State(state): State<ProxyState>,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
-    diagnostics::track(state.diagnostics.clone(), "codex", request, |request| {
-        handle_alpha_search_request(state, request)
-    })
+    diagnostics::track(
+        state.diagnostics.clone(),
+        "codex",
+        ResponseProtocol::Http,
+        request,
+        |request| handle_alpha_search_request(state, request),
+    )
     .await
 }
 
@@ -1077,15 +1118,21 @@ pub async fn handle_grokbuild_responses_compact(
     State(state): State<ProxyState>,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
-    diagnostics::track(state.diagnostics.clone(), "grokbuild", request, |request| {
-        handle_responses_compact_for_app(
-            state,
-            request,
-            AppType::GrokBuild,
-            "Grok Build",
-            "grokbuild",
-        )
-    })
+    diagnostics::track(
+        state.diagnostics.clone(),
+        "grokbuild",
+        ResponseProtocol::Http,
+        request,
+        |request| {
+            handle_responses_compact_for_app(
+                state,
+                request,
+                AppType::GrokBuild,
+                "Grok Build",
+                "grokbuild",
+            )
+        },
+    )
     .await
 }
 
@@ -2126,9 +2173,20 @@ pub async fn handle_gemini(
     uri: axum::http::Uri,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
-    diagnostics::track(state.diagnostics.clone(), "gemini", request, |request| {
-        handle_gemini_request(state, uri, request)
-    })
+    let protocol = if uri.path().ends_with(":generateContent")
+        || uri.path().ends_with(":streamGenerateContent")
+    {
+        ResponseProtocol::Gemini
+    } else {
+        ResponseProtocol::Http
+    };
+    diagnostics::track(
+        state.diagnostics.clone(),
+        "gemini",
+        protocol,
+        request,
+        |request| handle_gemini_request(state, uri, request),
+    )
     .await
 }
 
@@ -2173,6 +2231,11 @@ async fn handle_gemini_request(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
+    let expected_candidates = body
+        .pointer("/generationConfig/candidateCount")
+        .and_then(Value::as_u64)
+        .map(|count| usize::try_from(count).unwrap_or(usize::MAX))
+        .unwrap_or(1);
     let forwarder = ctx.create_forwarder(&state);
     let mut result = match forwarder
         .forward_with_retry(
@@ -2201,14 +2264,18 @@ async fn handle_gemini_request(
     ctx.provider = result.provider;
     let response = result.response;
 
-    process_response(
+    let mut response = process_response(
         response,
         &ctx,
         &state,
         &GEMINI_PARSER_CONFIG,
         connection_guard,
     )
-    .await
+    .await?;
+    response
+        .extensions_mut()
+        .insert(ExpectedCandidates(expected_candidates));
+    Ok(response)
 }
 
 fn should_use_claude_transform_streaming(
