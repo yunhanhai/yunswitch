@@ -44,6 +44,8 @@
 
 当前源码新增[共享渠道](SHARED-CHANNELS.md)，一次维护 Claude Code、Codex 的地址和 API Key，客户端独立保留模型与高级选项。`fd442720` 已通过完整源码 CI 和 Windows 178 项新包验收，真实界面的快速切换与 Codex 表单兼容问题已修复。该包为 build-only 验收产物，未进入公开 `.8` 附件。
 
+后续完成[关联已有配置](LINK-EXISTING-CHANNELS.md)，可以显式选择已分别添加的 Claude Code、Codex 条目及密钥来源，保留原 ID、客户端设置和路由引用；解除关联保留原条目。`18f4b7ec` 的完整源码 CI 与 Windows 新包 202 项验收通过，同样未替换公开 `.8` 附件。
+
 模型目录缓存按真实请求身份区分，持久化键只保存哈希；目录过期后先保留可用数据并在后台单飞刷新。说明、[源码 CI](https://github.com/yunhanhai/yunswitch/actions/runs/44981686760)与 [106 项 Windows build-only 验收](https://github.com/yunhanhai/yunswitch/actions/runs/44983308745)见[模型目录缓存](MODEL-CATALOG.md)。这项优化尚未进入公开安装包。
 
 已公开的 `3.20.1-yunswitch.2` Windows x64 安装版与免安装版见 [GitHub](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.2) 和 [Gitee](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.2)，其安装与首版升级验收通过。文件校验与运行记录见[`.2` 发布记录](releases/3.20.1-yunswitch.2.md)。

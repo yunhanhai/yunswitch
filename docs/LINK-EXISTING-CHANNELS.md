@@ -30,6 +30,20 @@
 
 API Key 仍按现有本地数据库和客户端配置方式保存，本功能不承诺只有一份物理副本。使用和验证均沿用 YunSwitch 独立身份与原有兼容策略。
 
-## 验证状态
+## 验证与交付
 
-实现与验证进行中，尚未声明源码或安装包验收通过。计划使用虚构密钥、合成配置及回环上游验证预览与取消、不同密钥选择、过期或陈旧预览、原 ID 与引用保留、失败回滚、部分同步失败、接管恢复和解除关联。最终源码检查、干净 Windows 便携及升级 MSI 的实际结果将分别记录。
+`18f4b7ec` 本机后端 3030 项单元和 128 项集成测试通过、6 项忽略，包含本轮 15 项关联专项及已有共享渠道回归。严格 Clippy、Rust/前端格式、TypeScript 和 renderer 生产构建通过。前端全量 1140 项通过，但 App 初始化超过默认 10 秒导致 9 项未执行；该文件单独以命令行 60 秒初始化期限复测 9 项通过，仓库默认超时未修改。
+
+[源码 CI](https://github.com/yunhanhai/yunswitch/actions/runs/45860248246)全部通过，包含三平台后端、Windows + WSL2 和前端 **151 文件 / 1149 项**。独立审查发现并修复排序等辅助写入可能覆盖关联的竞态，以及解除一边后的部分同步失败无法使用旧草稿重试；补充回归及定向复审通过。
+
+[Windows 新包构建与验收](https://github.com/yunhanhai/yunswitch/actions/runs/45860256519) **202 项全部通过**，源码与验收均为 `18f4b7ecf6736f7a4ec36aab350beb817041454a`。新增的 24 项覆盖便携和 `.7` 升级后 MSI 的真实界面预览与取消、不同密钥来源、陈旧预览拒绝、原 ID/模型/路由引用保留、并发回环请求、轮换、接管恢复、解除关联和重新关联；原有 178 项安装、迁移、诊断、共享渠道和代理场景继续通过。过期、事务失败、并发交错及部分同步失败由源码专项覆盖。
+
+本机已回读验收结果，核对 artifact digest、MSI/ZIP 校验文件和运行记录，确认 ZIP 内 EXE 与实际运行 EXE 相同，并检查实际界面截图。验收仅使用虚构密钥、合成配置和回环上游，真实付费供应商及其他平台安装包未验证。
+
+| 产物 | SHA256 |
+| --- | --- |
+| Windows MSI | `c6dbe1dcf5417f2872739c308b13be40d67a3cc2d1d2f5072ae6e4207a94c161` |
+| Windows Portable ZIP | `667c88eead284ca565e08c857ee6ccc71dd642777853485c9f2d2b997d9ac6ae` |
+| EXE | `258caafca8df302cfb16644c7a911438ed1c4fafb2d789503932f8294e684337` |
+
+工作分支 `feat/link-existing-channels`，审查入口：[GitHub #30](https://github.com/yunhanhai/yunswitch/pull/30)、[Gitee !23](https://gitee.com/yunhanhai/yunswitch/pulls/23)。本轮未发布新版本，公开 `.8` 包未替换。
