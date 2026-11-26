@@ -2,6 +2,7 @@
 //!
 //! 实现 OpenAI SSE → Anthropic SSE 格式转换
 
+use super::stream_error::StreamTransportError;
 use crate::proxy::sse::{strip_sse_field, take_sse_block};
 use bytes::Bytes;
 use futures::stream::{Stream, StreamExt};
@@ -627,13 +628,14 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                     }
                 }
                 Err(e) => {
-                    log::error!("Stream error: {e}");
+                    let error = StreamTransportError::from_error(&e);
+                    log::error!("Upstream stream failed: {}", error.code());
                     stream_ended_with_error = true;
                     let error_event = json!({
                         "type": "error",
                         "error": {
-                            "type": "stream_error",
-                            "message": format!("Stream error: {e}")
+                            "type": error.code(),
+                            "message": error.message()
                         }
                     });
                     let sse_data = format!("event: error\ndata: {}\n\n",

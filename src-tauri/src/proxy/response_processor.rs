@@ -9,8 +9,8 @@ use super::{
     handler_context::{RequestContext, StreamingTimeoutConfig},
     hyper_client::{ProxyResponse, MAX_RESPONSE_BODY_BYTES},
     server::ProxyState,
-    sse::{strip_sse_field, take_sse_block},
-    usage::parser::TokenUsage,
+    sse::{observed_sse_data, BoundedSseBuffer},
+    usage::{parser::TokenUsage, stream_summary::StreamUsageSummary},
     ProxyError,
 };
 use crate::database::PRICING_SOURCE_REQUEST;
@@ -350,7 +350,7 @@ pub struct SseUsageCollector {
 }
 
 struct SseUsageCollectorInner {
-    events: Mutex<Vec<Value>>,
+    summary: Mutex<StreamUsageSummary>,
     first_event_time: Mutex<Option<std::time::Instant>>,
     first_event_set: AtomicBool,
     start_time: std::time::Instant,
@@ -369,7 +369,7 @@ impl SseUsageCollector {
         let on_complete: UsageCallbackWithTiming = Arc::new(callback);
         Self {
             inner: Arc::new(SseUsageCollectorInner {
-                events: Mutex::new(Vec::new()),
+                summary: Mutex::new(StreamUsageSummary::default()),
                 first_event_time: Mutex::new(None),
                 first_event_set: AtomicBool::new(false),
                 start_time,
@@ -401,9 +401,16 @@ impl SseUsageCollector {
 
     /// 推送 SSE 事件
     pub async fn push(&self, event: Value) {
+        if self.inner.finished.load(Ordering::Acquire) {
+            return;
+        }
         self.mark_first_collected_event_time().await;
-        let mut events = self.inner.events.lock().await;
-        events.push(event);
+        let mut summary = self.inner.summary.lock().await;
+        // finish may have won the lock after the initial check. Never retain
+        // events pushed through another clone after completion/cancellation.
+        if !self.inner.finished.load(Ordering::Acquire) {
+            summary.push(event);
+        }
     }
 
     /// 完成收集并触发回调
@@ -413,8 +420,8 @@ impl SseUsageCollector {
         }
 
         let events = {
-            let mut guard = self.inner.events.lock().await;
-            std::mem::take(&mut *guard)
+            let mut guard = self.inner.summary.lock().await;
+            std::mem::take(&mut *guard).into_events()
         };
 
         let first_token_ms = {
@@ -689,8 +696,7 @@ pub fn create_logged_passthrough_stream(
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
     async_stream::stream! {
         let _conn_guard = connection_guard;
-        let mut buffer = String::new();
-        let mut utf8_remainder: Vec<u8> = Vec::new();
+        let mut observer = BoundedSseBuffer::default();
         let mut collector = usage_collector;
         let mut finish_guard = collector.clone().map(SseUsageFinishGuard::new);
         let inspect_sse_events =
@@ -746,35 +752,22 @@ pub fn create_logged_passthrough_stream(
                     }
                     is_first_chunk = false;
                     if inspect_sse_events {
-                        crate::proxy::sse::append_utf8_safe(&mut buffer, &mut utf8_remainder, &bytes);
-
-                        // 尝试解析并记录完整的 SSE 事件
-                        while let Some(event_text) = take_sse_block(&mut buffer) {
-                            if !event_text.trim().is_empty() {
-                                // 提取 data 部分；只有 usage collector 存在时才解析 JSON。
-                                for line in event_text.lines() {
-                                    if let Some(data) = strip_sse_field(line, "data") {
-                                        if data.trim() != "[DONE]" {
-                                            let collected = match &collector {
-                                                Some(c) if c.should_collect(data) => {
-                                                    match serde_json::from_str::<Value>(data) {
-                                                        Ok(json_value) => {
-                                                            c.push(json_value).await;
-                                                            true
-                                                        }
-                                                        Err(_) => false,
-                                                    }
-                                                }
-                                                _ => false,
-                                            };
-                                            log::trace!(
-                                                "[{tag}] <<< SSE data: bytes={}, usage_collected={collected} (content omitted)",
-                                                data.len()
-                                            );
-                                        } else {
-                                            log::debug!("[{tag}] <<< SSE: [DONE]");
+                        let mut remaining = bytes.as_ref();
+                        while let Some(event) = observer.next_event(&mut remaining) {
+                            if let Some(data) = observed_sse_data(event) {
+                                if data.trim() != "[DONE]" {
+                                    let collected = match &collector {
+                                        Some(c) if c.should_collect(&data) => {
+                                            match serde_json::from_str::<Value>(&data) {
+                                                Ok(value) => { c.push(value).await; true },
+                                                Err(_) => false,
+                                            }
                                         }
-                                    }
+                                        _ => false,
+                                    };
+                                    log::trace!("[{tag}] <<< SSE data: bytes={}, usage_collected={collected} (content omitted)", data.len());
+                                } else {
+                                    log::debug!("[{tag}] <<< SSE: [DONE]");
                                 }
                             }
                         }
@@ -784,7 +777,7 @@ pub fn create_logged_passthrough_stream(
                 }
                 Some(Err(e)) => {
                     log::error!("[{tag}] 流式响应中断 ({:?})", e.kind());
-                    yield Err(e);
+                    yield Err(crate::proxy::providers::safe_stream_error(&e));
                     break;
                 }
                 None => {
@@ -863,12 +856,173 @@ mod tests {
     use crate::proxy::providers::{
         codex_chat_history::CodexChatHistoryStore, gemini_shadow::GeminiShadowStore,
     };
+    use crate::proxy::sse::strip_sse_field;
     use crate::proxy::types::{ProxyConfig, ProxyStatus};
     use rust_decimal::Decimal;
     use std::collections::HashMap;
     use std::str::FromStr;
     use std::sync::Arc;
     use tokio::sync::RwLock;
+
+    #[tokio::test]
+    async fn passthrough_transport_errors_drop_private_text_and_keep_error_kind() {
+        for kind in [
+            std::io::ErrorKind::ConnectionReset,
+            std::io::ErrorKind::TimedOut,
+        ] {
+            let input = futures::stream::iter(vec![
+                Ok(Bytes::from_static(b"data: synthetic-visible-output\n\n")),
+                Err(std::io::Error::new(kind, "https://example.invalid/?key=sk-fake Authorization: fake Cookie: fake prompt=fake tool_args=fake encrypted_content=fake")),
+            ]);
+            let output = create_logged_passthrough_stream(
+                input,
+                "synthetic",
+                None,
+                StreamingTimeoutConfig {
+                    first_byte_timeout: 0,
+                    idle_timeout: 0,
+                },
+                None,
+            )
+            .collect::<Vec<_>>()
+            .await;
+            assert_eq!(output.len(), 2);
+            assert_eq!(
+                output[0].as_ref().unwrap().as_ref(),
+                b"data: synthetic-visible-output\n\n"
+            );
+            let error = output[1].as_ref().unwrap_err();
+            assert_eq!(error.kind(), kind);
+            assert_eq!(
+                error.to_string(),
+                if kind == std::io::ErrorKind::TimedOut {
+                    "Upstream stream timed out."
+                } else {
+                    "Upstream stream was interrupted."
+                }
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn bounded_observer_preserves_bytes_and_recovers_usage_after_oversize() {
+        let chunks = vec![
+            Bytes::from_static(b"data:{\"type\":\"message_start\",\"message\":{\"id\":\"synthetic\",\"model\":\"safe-model\",\"usage\":{\"input_tokens\":7}}}\n\n"),
+            Bytes::from(vec![b'x'; super::super::sse::MAX_OBSERVED_SSE_EVENT_BYTES * 4]),
+            Bytes::from_static(b"\r\n\r"),
+            Bytes::from_static(b"\ndata: {\"type\":\"message_delta\",\r\ndata: \"usage\":{\"output_tokens\":9}}\r\n\r\n"),
+        ];
+        let expected: Vec<u8> = chunks
+            .iter()
+            .flat_map(|chunk| chunk.iter().copied())
+            .collect();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let tx = std::sync::Mutex::new(Some(tx));
+        let collector =
+            SseUsageCollector::new(std::time::Instant::now(), None, move |events, _| {
+                if let Some(tx) = tx.lock().unwrap().take() {
+                    let _ = tx.send(TokenUsage::from_claude_stream_events(&events));
+                }
+            });
+        let stream = create_logged_passthrough_stream(
+            futures::stream::iter(chunks.into_iter().map(Ok)),
+            "synthetic",
+            Some(collector),
+            StreamingTimeoutConfig {
+                first_byte_timeout: 0,
+                idle_timeout: 0,
+            },
+            None,
+        );
+        tokio::pin!(stream);
+        let mut actual = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            actual.extend_from_slice(&chunk.unwrap());
+        }
+        assert_eq!(actual, expected);
+        let usage = rx.await.unwrap().unwrap();
+        assert_eq!((usage.input_tokens, usage.output_tokens), (7, 9));
+        assert_eq!(usage.model.as_deref(), Some("safe-model"));
+        assert_eq!(usage.message_id.as_deref(), Some("synthetic"));
+    }
+
+    #[tokio::test]
+    async fn bounded_observer_cancel_finishes_partial_usage_once() {
+        use std::sync::atomic::AtomicUsize;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counted = calls.clone();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let tx = std::sync::Mutex::new(Some(tx));
+        let collector =
+            SseUsageCollector::new(std::time::Instant::now(), None, move |events, _| {
+                counted.fetch_add(1, Ordering::SeqCst);
+                if let Some(tx) = tx.lock().unwrap().take() {
+                    let _ = tx.send(TokenUsage::from_claude_stream_events(&events));
+                }
+            });
+        let again = collector.clone();
+        let input = futures::stream::once(async { Ok::<_,std::io::Error>(Bytes::from_static(b"data:{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":7}}}\n\n")) }).chain(futures::stream::pending());
+        let mut stream = Box::pin(create_logged_passthrough_stream(
+            input,
+            "synthetic",
+            Some(collector),
+            StreamingTimeoutConfig {
+                first_byte_timeout: 0,
+                idle_timeout: 0,
+            },
+            None,
+        ));
+        assert!(stream.next().await.unwrap().is_ok());
+        drop(stream);
+        let usage = tokio::time::timeout(Duration::from_secs(2), rx)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(usage.input_tokens, 7);
+        again.finish().await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn usage_collector_concurrent_finish_discards_late_events_and_releases_summary() {
+        use std::sync::atomic::AtomicUsize;
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counted = calls.clone();
+        let collector =
+            SseUsageCollector::new(std::time::Instant::now(), None, move |events, timing| {
+                counted.fetch_add(1, Ordering::SeqCst);
+                let usage = TokenUsage::from_claude_stream_events(&events).unwrap();
+                assert_eq!(usage.input_tokens, 7);
+                assert!(timing.is_some());
+                assert!(!serde_json::to_string(&events)
+                    .unwrap()
+                    .contains("synthetic-private-body"));
+            });
+        collector
+            .push(serde_json::json!({
+                "type":"message_start",
+                "message":{
+                    "id":"synthetic-id","model":"synthetic-model",
+                    "content":[{"text":"synthetic-private-body"}],
+                    "usage":{"input_tokens":7},
+                },
+            }))
+            .await;
+        let other = collector.clone();
+        tokio::join!(collector.finish(), other.finish());
+        other
+            .push(serde_json::json!({
+                "type":"message_delta",
+                "usage":{"output_tokens":999},
+            }))
+            .await;
+        other.finish().await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        let retained = std::mem::take(&mut *collector.inner.summary.lock().await).into_events();
+        assert!(retained.is_empty());
+    }
 
     #[test]
     fn format_headers_keeps_only_allowlisted_diagnostic_values() {
@@ -916,22 +1070,22 @@ mod tests {
     #[test]
     fn test_strip_sse_field_accepts_optional_space() {
         assert_eq!(
-            super::strip_sse_field("data: {\"ok\":true}", "data"),
+            strip_sse_field("data: {\"ok\":true}", "data"),
             Some("{\"ok\":true}")
         );
         assert_eq!(
-            super::strip_sse_field("data:{\"ok\":true}", "data"),
+            strip_sse_field("data:{\"ok\":true}", "data"),
             Some("{\"ok\":true}")
         );
         assert_eq!(
-            super::strip_sse_field("event: message_start", "event"),
+            strip_sse_field("event: message_start", "event"),
             Some("message_start")
         );
         assert_eq!(
-            super::strip_sse_field("event:message_start", "event"),
+            strip_sse_field("event:message_start", "event"),
             Some("message_start")
         );
-        assert_eq!(super::strip_sse_field("id:1", "data"), None);
+        assert_eq!(strip_sse_field("id:1", "data"), None);
     }
 
     #[test]
