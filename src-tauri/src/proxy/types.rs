@@ -72,6 +72,15 @@ pub struct ProxyStatus {
     pub success_requests: u64,
     /// 失败请求数
     pub failed_requests: u64,
+    /// Requests still being handled or delivered.
+    #[serde(default)]
+    pub pending_requests: u64,
+    #[serde(default)]
+    pub cancelled_requests: u64,
+    #[serde(default)]
+    pub timed_out_requests: u64,
+    #[serde(default)]
+    pub unconfirmed_requests: u64,
     /// 成功率 (0-100)
     pub success_rate: f32,
     /// 运行时间（秒）

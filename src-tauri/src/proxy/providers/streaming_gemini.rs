@@ -26,6 +26,7 @@ fn map_finish_reason(reason: Option<&str>, has_tool_use: bool, blocked: bool) ->
         Some("SAFETY")
         | Some("RECITATION")
         | Some("SPII")
+        | Some("LANGUAGE")
         | Some("BLOCKLIST")
         | Some("PROHIBITED_CONTENT") => "refusal",
         _ if has_tool_use => "tool_use",
@@ -325,6 +326,7 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
                             .get("promptFeedback")
                             .and_then(|value| value.get("blockReason"))
                             .and_then(|value| value.as_str())
+                            .filter(|reason| !reason.is_empty() && *reason != "BLOCK_REASON_UNSPECIFIED")
                         {
                             blocked_text = Some(format!("Request blocked by Gemini safety filters: {reason}"));
                         }
@@ -410,6 +412,33 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
             }
         }
 
+        // EOF and [DONE] alone do not confirm Gemini generation completed.
+        // Do not turn an unfinished tool snapshot into an executable tool_use
+        // block or save partial text/thought signatures for later replay.
+        if blocked_text.is_none()
+            && !latest_finish_reason.as_deref().is_some_and(|reason| {
+                matches!(reason, "STOP" | "MAX_TOKENS" | "SAFETY" | "RECITATION"
+                    | "SPII" | "BLOCKLIST" | "PROHIBITED_CONTENT" | "LANGUAGE")
+            })
+        {
+            let error = json!({
+                "type": "error",
+                "error": {
+                    "type": "incomplete_response",
+                    "message": "Upstream stream ended before a completion signal.",
+                },
+            });
+            yield Ok(encode_sse("error", &error));
+            return;
+        }
+
+        let truncated = latest_finish_reason.as_deref() == Some("MAX_TOKENS");
+        if truncated {
+            // A bounded text response may still report usage, but partial tool
+            // arguments cannot become executable calls or replayable history.
+            tool_call_snapshots.clear();
+        }
+
         if !has_sent_message_start {
             let event = json!({
                 "type": "message_start",
@@ -483,7 +512,7 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
                 text_thought_signature.as_deref(),
                 &tool_calls,
             );
-            if !shadow_parts.is_empty() {
+            if !truncated && !shadow_parts.is_empty() {
                 store.record_assistant_turn(
                     provider_id,
                     session_id,
@@ -628,6 +657,149 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join("")
         })
+    }
+
+    fn assert_incomplete_stream(output: &str) {
+        assert!(!output.contains("event: message_delta"), "{output}");
+        assert!(!output.contains("event: message_stop"), "{output}");
+        assert!(!output.contains("\"type\":\"tool_use\""), "{output}");
+        assert!(
+            !output.contains("\"type\":\"input_json_delta\""),
+            "{output}"
+        );
+        let terminal: Value = output
+            .lines()
+            .filter_map(|line| line.strip_prefix("data: "))
+            .filter_map(|data| serde_json::from_str(data).ok())
+            .next_back()
+            .unwrap();
+        assert_eq!(
+            terminal,
+            json!({
+                "type": "error",
+                "error": {
+                    "type": "incomplete_response",
+                    "message": "Upstream stream ended before a completion signal.",
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn truncated_tool_calls_never_become_executable_or_replayable() {
+        let store = Arc::new(GeminiShadowStore::with_limits(8, 4));
+        for reason in [
+            "MAX_TOKENS",
+            "MALFORMED_FUNCTION_CALL",
+            "UNEXPECTED_TOOL_CALL",
+            "OTHER",
+        ] {
+            let frame = format!(
+                "data: {}\n\n",
+                json!({
+                    "candidates":[{"finishReason":reason,"content":{"parts":[
+                        {"functionCall":{"name":"synthetic_tool","args":{"partial":"private-incomplete"}}}
+                    ]}}],
+                    "usageMetadata":{"promptTokenCount":3,"totalTokenCount":5},
+                })
+            );
+            let output =
+                collect_stream_output_with_shadow(vec![&frame], store.clone(), "synthetic", reason);
+            assert!(!output.contains("\"type\":\"tool_use\""));
+            assert!(!output.contains("private-incomplete"));
+            assert!(store
+                .latest_assistant_content("synthetic", reason)
+                .is_none());
+            if reason == "MAX_TOKENS" {
+                assert!(output.contains("max_tokens"));
+            } else {
+                assert_incomplete_stream(&output);
+            }
+        }
+    }
+
+    #[test]
+    fn missing_finish_never_commits_partial_text_thoughts_or_tools() {
+        let variants = [
+            json!([{"text": "partial visible output"}]),
+            json!([{"thought": true, "text": "private-incomplete-thought", "thoughtSignature": "private-incomplete-signature"}]),
+            json!([{"functionCall": {"name": "synthetic_tool", "args": {"command": "private-incomplete-argument"}}, "thoughtSignature": "private-incomplete-signature"}]),
+            json!([]),
+        ];
+        for parts in variants {
+            for reason in [Value::Null, json!(""), json!("FINISH_REASON_UNSPECIFIED")] {
+                let store = Arc::new(GeminiShadowStore::with_limits(8, 4));
+                let previous = json!({"parts": [{"text": "prior completed turn"}]});
+                store.record_assistant_turn("provider-a", "session-1", previous.clone(), vec![]);
+                let event = json!({
+                    "responseId": "synthetic-partial",
+                    "candidates": [{"finishReason": reason, "content": {"parts": parts}}],
+                    "usageMetadata": {"promptTokenCount": 5, "totalTokenCount": 8},
+                });
+                let input = format!("data: {event}\n\n");
+                let output = collect_stream_output_with_shadow(
+                    vec![&input],
+                    store.clone(),
+                    "provider-a",
+                    "session-1",
+                );
+                assert_incomplete_stream(&output);
+                assert!(!output.contains("private-incomplete"), "{output}");
+                assert_eq!(
+                    store.latest_assistant_content("provider-a", "session-1"),
+                    Some(previous)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn empty_or_done_only_stream_is_not_a_completed_gemini_response() {
+        for chunks in [
+            vec![],
+            vec!["data: [DONE]\n\n"],
+            vec!["data: {\"promptFeedback\":{\"blockReason\":\"\"}}\n\n"],
+            vec!["data: {\"promptFeedback\":{\"blockReason\":\"BLOCK_REASON_UNSPECIFIED\"}}\n\n"],
+            vec!["data: {\"usageMetadata\":{\"promptTokenCount\":5,\"totalTokenCount\":8}}\n\n"],
+            vec!["data: {\"candidates\":[{\"finishReason\":\"STOP\"}]}"],
+        ] {
+            assert_incomplete_stream(&collect_stream_output(chunks));
+        }
+    }
+
+    #[test]
+    fn explicit_finish_and_prompt_block_keep_existing_terminal_and_usage_mapping() {
+        for (reason, expected) in [
+            ("STOP", "end_turn"),
+            ("MAX_TOKENS", "max_tokens"),
+            ("SAFETY", "refusal"),
+            ("RECITATION", "refusal"),
+        ] {
+            let event = json!({
+                "candidates": [{"finishReason": reason, "content": {"parts": [{"text": "synthetic output"}]}}],
+                "usageMetadata": {"promptTokenCount": 5, "totalTokenCount": 8, "cachedContentTokenCount": 2},
+            });
+            let input = format!("data: {event}\n\n");
+            let output = collect_stream_output(vec![&input]);
+            assert_eq!(output.matches("event: message_stop").count(), 1);
+            assert!(!output.contains("event: error"));
+            let terminal: Value = output
+                .lines()
+                .filter_map(|line| line.strip_prefix("data: "))
+                .filter_map(|data| serde_json::from_str::<Value>(data).ok())
+                .find(|event| event["type"] == "message_delta")
+                .unwrap();
+            assert_eq!(terminal["delta"]["stop_reason"], expected);
+            assert_eq!(terminal["usage"]["input_tokens"], 3);
+            assert_eq!(terminal["usage"]["output_tokens"], 3);
+            assert_eq!(terminal["usage"]["cache_read_input_tokens"], 2);
+        }
+        let output = collect_stream_output(vec![
+            "data: {\"promptFeedback\":{\"blockReason\":\"SAFETY\"}}\n\n",
+        ]);
+        assert!(output.contains("\"stop_reason\":\"refusal\""));
+        assert_eq!(output.matches("event: message_stop").count(), 1);
+        assert!(!output.contains("event: error"));
     }
 
     #[test]

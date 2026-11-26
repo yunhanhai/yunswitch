@@ -736,12 +736,7 @@ impl RequestForwarder {
 
         permit.release();
         let mut status = self.status.write().await;
-        status.failed_requests += 1;
         status.last_error = Some(summarize_proxy_error(&retry_err));
-        if status.total_requests > 0 {
-            status.success_rate =
-                (status.success_requests as f32 / status.total_requests as f32) * 100.0;
-        }
         Some(ForwardError {
             error: retry_err,
             provider: Some(provider.clone()),
@@ -750,10 +745,9 @@ impl RequestForwarder {
 
     /// 转发请求（带故障转移）
     ///
-    /// 这是 thin wrapper：在客户端请求维度记一次 `total_requests` / 调整
-    /// `active_connections` / 刷新 `last_request_at`，无论 inner 走哪条出口路径，
-    /// 出口处都会把 `active_connections` 回收。Per-attempt 维度（成功/失败/熔断
-    /// 等）仍由 inner 内自行更新 `success_requests` / `failed_requests`。
+    /// Own the active transport lease through response delivery. Request completion
+    /// counters are settled by the outer request lifecycle; provider health,
+    /// cooldown and failover decisions keep their existing per-attempt timing.
     #[allow(clippy::too_many_arguments)]
     pub async fn forward_with_retry(
         &self,
@@ -766,11 +760,6 @@ impl RequestForwarder {
         providers: Vec<Provider>,
     ) -> Result<ForwardResult, ForwardError> {
         let guard = ActiveConnectionGuard::acquire(self.status.clone()).await;
-        {
-            let mut s = self.status.write().await;
-            s.total_requests = s.total_requests.saturating_add(1);
-            s.last_request_at = Some(chrono::Utc::now().to_rfc3339());
-        }
         let budget = super::request_budget::RecoveryBudget::new();
         let trace = extensions.get::<RequestTrace>().cloned();
         extensions.insert(budget.clone());
@@ -787,12 +776,7 @@ impl RequestForwarder {
                     trace.note_error((&error).into());
                 }
                 let mut status = self.status.write().await;
-                status.failed_requests += 1;
                 status.last_error = Some(error.to_string());
-                if status.total_requests > 0 {
-                    status.success_rate =
-                        status.success_requests as f32 / status.total_requests as f32 * 100.0;
-                }
                 Err(ForwardError {
                     error,
                     provider: None,
@@ -940,7 +924,7 @@ impl RequestForwarder {
 
             // 更新状态中的当前 Provider 信息（per-attempt 维度的标识）
             //
-            // total_requests / last_request_at / active_connections 已由
+            // active_connections 已由
             // forward_with_retry wrapper 在客户端请求维度统一处理，这里只刷
             // 新「正在尝试哪个 provider」的展示字段。
             {
@@ -1104,10 +1088,9 @@ impl RequestForwarder {
                         );
                     }
 
-                    // 更新成功统计
+                    // 更新实际供应商与故障转移状态
                     {
                         let mut status = self.status.write().await;
-                        status.success_requests += 1;
                         status.last_error = None;
                         let should_switch =
                             self.current_provider_id_at_start.as_str() != provider.id.as_str();
@@ -1128,12 +1111,6 @@ impl RequestForwarder {
                                     fm.try_switch(ah.as_ref(), &at, &pid, &pname, freason).await;
                             });
                         }
-                        // 重新计算成功率
-                        if status.total_requests > 0 {
-                            status.success_rate = (status.success_requests as f32
-                                / status.total_requests as f32)
-                                * 100.0;
-                        }
                     }
 
                     return Ok(ForwardResult {
@@ -1149,13 +1126,7 @@ impl RequestForwarder {
                         self.record_provider_failure(provider, app_type_str, &mut permit, &e)
                             .await;
                         let mut status = self.status.write().await;
-                        status.failed_requests += 1;
                         status.last_error = Some(summarize_proxy_error(&e));
-                        if status.total_requests > 0 {
-                            status.success_rate = (status.success_requests as f32
-                                / status.total_requests as f32)
-                                * 100.0;
-                        }
                         return Err(ForwardError {
                             error: e,
                             provider: Some(provider.clone()),
@@ -1232,7 +1203,6 @@ impl RequestForwarder {
 
                                     {
                                         let mut status = self.status.write().await;
-                                        status.success_requests += 1;
                                         status.last_error = None;
                                         let should_switch =
                                             self.current_provider_id_at_start.as_str()
@@ -1257,11 +1227,6 @@ impl RequestForwarder {
                                                     )
                                                     .await;
                                             });
-                                        }
-                                        if status.total_requests > 0 {
-                                            status.success_rate = (status.success_requests as f32
-                                                / status.total_requests as f32)
-                                                * 100.0;
                                         }
                                     }
 
@@ -1310,13 +1275,7 @@ impl RequestForwarder {
                                 // 释放 HalfOpen permit（不记录熔断器，这是客户端兼容性问题）
                                 permit.release();
                                 let mut status = self.status.write().await;
-                                status.failed_requests += 1;
                                 status.last_error = Some(summarize_proxy_error(&e));
-                                if status.total_requests > 0 {
-                                    status.success_rate = (status.success_requests as f32
-                                        / status.total_requests as f32)
-                                        * 100.0;
-                                }
                                 return Err(ForwardError {
                                     error: e,
                                     provider: Some(provider.clone()),
@@ -1385,10 +1344,9 @@ impl RequestForwarder {
                                             );
                                         }
 
-                                        // 更新成功统计
+                                        // 更新实际供应商与故障转移状态
                                         {
                                             let mut status = self.status.write().await;
-                                            status.success_requests += 1;
                                             status.last_error = None;
                                             let should_switch =
                                                 self.current_provider_id_at_start.as_str()
@@ -1415,12 +1373,6 @@ impl RequestForwarder {
                                                         )
                                                         .await;
                                                 });
-                                            }
-                                            if status.total_requests > 0 {
-                                                status.success_rate = (status.success_requests
-                                                    as f32
-                                                    / status.total_requests as f32)
-                                                    * 100.0;
                                             }
                                         }
 
@@ -1472,13 +1424,7 @@ impl RequestForwarder {
                                 );
                                 permit.release();
                                 let mut status = self.status.write().await;
-                                status.failed_requests += 1;
                                 status.last_error = Some(summarize_proxy_error(&e));
-                                if status.total_requests > 0 {
-                                    status.success_rate = (status.success_requests as f32
-                                        / status.total_requests as f32)
-                                        * 100.0;
-                                }
                                 return Err(ForwardError {
                                     error: e,
                                     provider: Some(provider.clone()),
@@ -1492,13 +1438,7 @@ impl RequestForwarder {
                                 );
                                 permit.release();
                                 let mut status = self.status.write().await;
-                                status.failed_requests += 1;
                                 status.last_error = Some(summarize_proxy_error(&e));
-                                if status.total_requests > 0 {
-                                    status.success_rate = (status.success_requests as f32
-                                        / status.total_requests as f32)
-                                        * 100.0;
-                                }
                                 return Err(ForwardError {
                                     error: e,
                                     provider: Some(provider.clone()),
@@ -1551,7 +1491,6 @@ impl RequestForwarder {
 
                                     {
                                         let mut status = self.status.write().await;
-                                        status.success_requests += 1;
                                         status.last_error = None;
                                         let should_switch =
                                             self.current_provider_id_at_start.as_str()
@@ -1575,11 +1514,6 @@ impl RequestForwarder {
                                                     )
                                                     .await;
                                             });
-                                        }
-                                        if status.total_requests > 0 {
-                                            status.success_rate = (status.success_requests as f32
-                                                / status.total_requests as f32)
-                                                * 100.0;
                                         }
                                     }
 
@@ -1619,13 +1553,7 @@ impl RequestForwarder {
                     if signature_rectifier_non_retryable_client_error {
                         permit.release();
                         let mut status = self.status.write().await;
-                        status.failed_requests += 1;
                         status.last_error = Some(summarize_proxy_error(&e));
-                        if status.total_requests > 0 {
-                            status.success_rate = (status.success_requests as f32
-                                / status.total_requests as f32)
-                                * 100.0;
-                        }
                         return Err(ForwardError {
                             error: e,
                             provider: Some(provider.clone()),
@@ -1669,13 +1597,7 @@ impl RequestForwarder {
                             permit.release();
                             {
                                 let mut status = self.status.write().await;
-                                status.failed_requests += 1;
                                 status.last_error = Some(summarize_proxy_error(&e));
-                                if status.total_requests > 0 {
-                                    status.success_rate = (status.success_requests as f32
-                                        / status.total_requests as f32)
-                                        * 100.0;
-                                }
                             }
                             return Err(ForwardError {
                                 error: e,
@@ -1691,12 +1613,7 @@ impl RequestForwarder {
             // providers 列表非空，但全部被熔断器拒绝（典型：HalfOpen 探测名额被占用）
             {
                 let mut status = self.status.write().await;
-                status.failed_requests += 1;
                 status.last_error = Some("所有供应商暂时不可用（熔断器限制）".to_string());
-                if status.total_requests > 0 {
-                    status.success_rate =
-                        (status.success_requests as f32 / status.total_requests as f32) * 100.0;
-                }
             }
             return Err(ForwardError {
                 error: ProxyError::NoAvailableProvider,
@@ -1707,12 +1624,7 @@ impl RequestForwarder {
         // 所有供应商都失败了
         {
             let mut status = self.status.write().await;
-            status.failed_requests += 1;
             status.last_error = Some("所有供应商都失败".to_string());
-            if status.total_requests > 0 {
-                status.success_rate =
-                    (status.success_requests as f32 / status.total_requests as f32) * 100.0;
-            }
         }
 
         if let Some((log_code, log_message)) =
@@ -6958,8 +6870,9 @@ mod tests {
                 let status = fwd.status.read().await;
                 assert_eq!(status.rate_limit_waits_for("codex").count, 1);
                 assert_eq!(status.rate_limit_waits_for("codex").total_secs, 1);
-                assert_eq!(status.total_requests, 1);
-                assert_eq!(status.success_requests, 1);
+                // Forwarding alone cannot claim the final client delivery outcome.
+                assert_eq!(status.total_requests, 0);
+                assert_eq!(status.success_requests, 0);
             } else {
                 assert!(matches!(
                     result,

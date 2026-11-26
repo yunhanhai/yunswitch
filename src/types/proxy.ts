@@ -19,6 +19,11 @@ export interface ProxyStatus {
   total_requests: number;
   success_requests: number;
   failed_requests: number;
+  /** Final outcomes are counted once per client request, after response delivery. */
+  pending_requests?: number;
+  cancelled_requests?: number;
+  timed_out_requests?: number;
+  unconfirmed_requests?: number;
   success_rate: number;
   uptime_seconds: number;
   current_provider: string | null;
