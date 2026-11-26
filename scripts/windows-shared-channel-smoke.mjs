@@ -476,9 +476,12 @@ export async function exerciseSharedChannels(cdp, { check, until, label }) {
     await showProviderList("codex");
     await until(
       () =>
-        cdp.evaluate(
-          `!!document.querySelector(${JSON.stringify(`[data-shared-channel-id="${channel.id}"]`)})`,
-        ),
+        cdp.evaluate(`(() => {
+          let card = document.querySelector(${JSON.stringify(`[data-shared-channel-id="${channel.id}"]`)});
+          const selector = 'button[title="Edit"],button[title="编辑"]';
+          while (card && !card.querySelector(selector)) card = card.parentElement;
+          return !!card?.textContent.includes('synthetic Codex-specific note');
+        })()`),
       "load the current linked Codex provider",
     );
     assert.equal(
