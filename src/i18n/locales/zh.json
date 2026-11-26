@@ -2880,7 +2880,11 @@
         "activeConnections": "活跃连接",
         "totalRequests": "总请求数",
         "successRate": "成功率",
-        "uptime": "运行时间"
+        "uptime": "运行时间",
+        "noResults": "暂无结果",
+        "requestResults": "请求结果",
+        "pendingRequests": "进行中",
+        "successRateScope": "成功率 = 成功 ÷（成功 + 失败 + 超时）。进行中、已取消和结果未确认的请求不计入成功率；每个请求在结束时只结算一次。"
       }
     },
     "settings": {
@@ -3113,7 +3117,8 @@
         "succeeded": "已成功",
         "failed": "已失败",
         "cancelled": "已取消",
-        "timedOut": "已超时"
+        "timedOut": "已超时",
+        "unconfirmed": "结果未确认"
       },
       "reasons": {
         "retryAfter": "上游 Retry-After",
@@ -3125,7 +3130,9 @@
         "requestCorrection": "修正请求后重试",
         "proxyStopped": "代理已停止",
         "clientDisconnected": "客户端断开",
-        "upstreamCancelled": "上游取消响应"
+        "upstreamCancelled": "上游取消响应",
+        "observationLimit": "响应超出观察上限，无法确认完整结果",
+        "unsupportedResponse": "响应格式或编码不支持结果确认"
       },
       "errors": {
         "rateLimited": "上游限流",

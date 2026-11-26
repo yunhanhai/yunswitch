@@ -138,4 +138,45 @@ describe("request diagnostics", () => {
     expect(JSON.parse(exported)).toEqual({ schemaVersion: 1, ...stopped });
     expect(exported).not.toContain("Private local provider label");
   });
+
+  it("distinguishes unconfirmed outcomes and preserves the safe reason when copied", async () => {
+    const current = {
+      phase: "unconfirmed",
+      reason: "observationLimit",
+      attempt: 1,
+      offsetMs: 1500,
+      elapsedMs: 0,
+    } as const;
+    const detail: RequestDetail = {
+      ...completed,
+      current,
+      steps: [current],
+      omittedSteps: 0,
+    };
+    vi.spyOn(proxyApi, "getRequestDiagnostics").mockResolvedValue({
+      active: [],
+      recent: [detail],
+      untrackedActive: 0,
+    });
+    vi.spyOn(proxyApi, "getRequestDiagnosticDetail").mockResolvedValue(detail);
+    vi.mocked(copyText).mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <RequestDiagnosticsPanel running={false} />
+      </QueryClientProvider>,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /结果未确认/ }));
+    expect(
+      (await screen.findAllByText("响应超出观察上限，无法确认完整结果")).length,
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText("已成功")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "复制脱敏摘要" }));
+    await waitFor(() => expect(copyText).toHaveBeenCalledOnce());
+    expect(JSON.parse(vi.mocked(copyText).mock.calls[0][0])).toEqual({
+      schemaVersion: 1,
+      ...detail,
+    });
+  });
 });

@@ -232,7 +232,13 @@ export async function exerciseStreamSafety(cdp, { check, until, label }) {
             ignored_body: privateMarker,
           }),
         );
-      events.push(frame("message_stop", { type: "message_stop" }));
+      events.push(
+        frame("message_delta", {
+          type: "message_delta",
+          delta: { stop_reason: "end_turn" },
+        }),
+        frame("message_stop", { type: "message_stop" }),
+      );
       passthroughBytes = Buffer.from(events.join(""));
       const response = await send("claude");
       assert.equal(response.status, 200);

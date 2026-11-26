@@ -23,6 +23,7 @@ const phaseVariants: Partial<
   failed: "destructive",
   timedOut: "destructive",
   cancelled: "outline",
+  unconfirmed: "outline",
 };
 
 function duration(ms: number, language: string) {

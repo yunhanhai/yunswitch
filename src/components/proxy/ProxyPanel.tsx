@@ -50,6 +50,11 @@ export function ProxyPanel({
   const { t } = useTranslation();
   const { data: status } = useProxyStatusQuery();
   const isRunning = status?.running ?? false;
+  const hasCompletedResults =
+    (status?.success_requests ?? 0) +
+      (status?.failed_requests ?? 0) +
+      (status?.timed_out_requests ?? 0) >
+    0;
 
   // 获取应用接管状态
   const { data: takeoverStatus } = useProxyTakeoverStatus();
@@ -487,8 +492,18 @@ export function ProxyPanel({
                 label={t("proxy.panel.stats.successRate", {
                   defaultValue: "成功率",
                 })}
-                value={`${status.success_rate.toFixed(1)}%`}
-                variant={status.success_rate > 90 ? "success" : "warning"}
+                value={
+                  hasCompletedResults
+                    ? `${status.success_rate.toFixed(1)}%`
+                    : t("proxy.panel.stats.noResults")
+                }
+                variant={
+                  !hasCompletedResults
+                    ? "default"
+                    : status.success_rate > 90
+                      ? "success"
+                      : "warning"
+                }
               />
               <StatCard
                 icon={<Clock className="h-4 w-4" />}
@@ -497,6 +512,33 @@ export function ProxyPanel({
                 })}
                 value={formatUptime(status.uptime_seconds)}
               />
+              <div className="col-span-full space-y-2 rounded-lg border border-border bg-card/60 p-3">
+                <h4 className="text-sm font-medium">
+                  {t("proxy.panel.stats.requestResults")}
+                </h4>
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3 lg:grid-cols-6">
+                  {[
+                    ["succeeded", status.success_requests],
+                    ["failed", status.failed_requests],
+                    ["timedOut", status.timed_out_requests ?? 0],
+                    ["cancelled", status.cancelled_requests ?? 0],
+                    ["unconfirmed", status.unconfirmed_requests ?? 0],
+                    ["pending", status.pending_requests ?? 0],
+                  ].map(([outcome, count]) => (
+                    <div key={outcome} className="min-w-0 space-y-1">
+                      <dt className="text-xs text-muted-foreground">
+                        {outcome === "pending"
+                          ? t("proxy.panel.stats.pendingRequests")
+                          : t(`proxy.requestDiagnostics.phases.${outcome}`)}
+                      </dt>
+                      <dd className="font-medium tabular-nums">{count}</dd>
+                    </div>
+                  ))}
+                </dl>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  {t("proxy.panel.stats.successRateScope")}
+                </p>
+              </div>
             </div>
           </div>
         ) : (

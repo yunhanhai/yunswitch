@@ -2880,7 +2880,11 @@
         "activeConnections": "活躍連線",
         "totalRequests": "總請求數",
         "successRate": "成功率",
-        "uptime": "運作時間"
+        "uptime": "運作時間",
+        "noResults": "暫無結果",
+        "requestResults": "請求結果",
+        "pendingRequests": "進行中",
+        "successRateScope": "成功率 = 成功 ÷（成功 + 失敗 + 逾時）。進行中、已取消和結果未確認的請求不計入成功率；每個請求在結束時只計算一次。"
       }
     },
     "settings": {
@@ -3113,7 +3117,8 @@
         "succeeded": "成功",
         "failed": "失敗",
         "cancelled": "已取消",
-        "timedOut": "已逾時"
+        "timedOut": "已逾時",
+        "unconfirmed": "結果未確認"
       },
       "reasons": {
         "retryAfter": "上游 Retry-After",
@@ -3125,7 +3130,9 @@
         "requestCorrection": "修正請求後重試",
         "proxyStopped": "代理已停止",
         "clientDisconnected": "用戶端已中斷連線",
-        "upstreamCancelled": "上游取消回應"
+        "upstreamCancelled": "上游取消回應",
+        "observationLimit": "回應超出觀察上限，無法確認完整結果",
+        "unsupportedResponse": "回應格式或編碼不支援結果確認"
       },
       "errors": {
         "rateLimited": "上游限流",

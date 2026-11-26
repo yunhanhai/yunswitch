@@ -2,6 +2,7 @@
 //! or response content, credentials, session identifiers, or error messages.
 
 mod response;
+pub(crate) use response::ExpectedCandidates;
 
 use super::ProxyError;
 use axum::extract::Request;
@@ -34,6 +35,7 @@ pub(crate) enum Phase {
     Failed,
     Cancelled,
     TimedOut,
+    Unconfirmed,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -49,6 +51,19 @@ pub(crate) enum Reason {
     ProxyStopped,
     ClientDisconnected,
     UpstreamCancelled,
+    ObservationLimit,
+    UnsupportedResponse,
+}
+
+/// The protocol delivered to the client, selected by its handler rather than
+/// inferred from an application name that may serve several different APIs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ResponseProtocol {
+    Messages,
+    Chat,
+    Responses,
+    Gemini,
+    Http,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -326,9 +341,38 @@ impl Record {
 #[derive(Default)]
 struct Registry {
     accepting: bool,
+    generation: u64,
+    totals: CompletionTotals,
     active: HashMap<String, Record>,
     recent: VecDeque<Record>,
     untracked_active: usize,
+}
+
+/// Fixed-size aggregates also cover requests omitted from the bounded timeline.
+#[derive(Default)]
+struct CompletionTotals {
+    total: u64,
+    pending: u64,
+    succeeded: u64,
+    failed: u64,
+    timed_out: u64,
+    cancelled: u64,
+    unconfirmed: u64,
+    last_request_at: Option<String>,
+}
+
+impl CompletionTotals {
+    fn finish(&mut self, outcome: Outcome) {
+        self.pending = self.pending.saturating_sub(1);
+        let count = match outcome {
+            Outcome::Success => &mut self.succeeded,
+            Outcome::Error(error) if error.phase() == Phase::TimedOut => &mut self.timed_out,
+            Outcome::Error(_) => &mut self.failed,
+            Outcome::Cancelled(_) => &mut self.cancelled,
+            Outcome::Unconfirmed(_) => &mut self.unconfirmed,
+        };
+        *count = count.saturating_add(1);
+    }
 }
 
 impl Registry {
@@ -348,6 +392,7 @@ impl Registry {
             Outcome::Success => (Phase::Succeeded, None, None),
             Outcome::Error(error) => (error.phase(), None, Some(error)),
             Outcome::Cancelled(reason) => (Phase::Cancelled, Some(reason), None),
+            Outcome::Unconfirmed(reason) => (Phase::Unconfirmed, Some(reason), None),
         };
         record.advance(phase, reason).error = error;
         record.ended = Some(Instant::now());
@@ -389,6 +434,12 @@ impl Diagnostics {
     pub(crate) fn stop(&self) {
         let mut registry = self.lock();
         registry.accepting = false;
+        registry.generation = registry.generation.wrapping_add(1);
+        registry.totals.cancelled = registry
+            .totals
+            .cancelled
+            .saturating_add(registry.totals.pending);
+        registry.totals.pending = 0;
         registry.untracked_active = 0;
         let mut active: Vec<_> = registry
             .active
@@ -408,6 +459,9 @@ impl Diagnostics {
             return None;
         }
         registry.prune();
+        registry.totals.total = registry.totals.total.saturating_add(1);
+        registry.totals.pending = registry.totals.pending.saturating_add(1);
+        registry.totals.last_request_at = Some(chrono::Utc::now().to_rfc3339());
         let trace = if registry.active.len() < MAX_ACTIVE {
             let id = uuid::Uuid::new_v4().simple().to_string();
             let started = Instant::now();
@@ -446,7 +500,30 @@ impl Diagnostics {
             store: self.clone(),
             trace,
             armed: true,
+            generation: registry.generation,
         })
+    }
+
+    pub(crate) fn apply_status(&self, status: &mut super::types::ProxyStatus) {
+        let registry = self.lock();
+        let totals = &registry.totals;
+        status.total_requests = totals.total;
+        status.pending_requests = totals.pending;
+        status.success_requests = totals.succeeded;
+        status.failed_requests = totals.failed;
+        status.timed_out_requests = totals.timed_out;
+        status.cancelled_requests = totals.cancelled;
+        status.unconfirmed_requests = totals.unconfirmed;
+        status.last_request_at.clone_from(&totals.last_request_at);
+        let confirmed = totals
+            .succeeded
+            .saturating_add(totals.failed)
+            .saturating_add(totals.timed_out);
+        status.success_rate = if confirmed == 0 {
+            0.0
+        } else {
+            (totals.succeeded as f64 / confirmed as f64 * 100.0) as f32
+        };
     }
 
     pub(crate) fn snapshot(&self) -> Snapshot {
@@ -571,12 +648,14 @@ enum Outcome {
     Success,
     Error(DiagnosticError),
     Cancelled(Reason),
+    Unconfirmed(Reason),
 }
 
 struct RequestGuard {
     store: Arc<Diagnostics>,
     trace: Option<RequestTrace>,
     armed: bool,
+    generation: u64,
 }
 
 impl RequestGuard {
@@ -585,6 +664,10 @@ impl RequestGuard {
             return;
         }
         let mut registry = self.store.lock();
+        if self.generation != registry.generation {
+            return;
+        }
+        registry.totals.finish(outcome);
         if let Some(trace) = self.trace.take() {
             if let Some(record) = registry.active.remove(&trace.id) {
                 registry.archive(record, outcome);
@@ -607,6 +690,7 @@ impl Drop for RequestGuard {
 pub(crate) async fn track<F>(
     store: Arc<Diagnostics>,
     app_type: &str,
+    protocol: ResponseProtocol,
     mut request: Request,
     handle: impl FnOnce(Request) -> F,
 ) -> Result<Response, ProxyError>
@@ -621,7 +705,7 @@ where
     }
     let head = request.method() == http::Method::HEAD;
     match handle(request).await {
-        Ok(response) => Ok(response::observe(response, guard, head)),
+        Ok(response) => Ok(response::observe(response, guard, head, protocol)),
         Err(error) => {
             guard.finish(Outcome::Error((&error).into()));
             Err(error)
@@ -632,6 +716,59 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn completion_totals_cover_capacity_overflow_and_retire_stopped_guards() {
+        let store = Arc::new(Diagnostics::default());
+        store.start();
+        let mut requests: Vec<_> = (0..MAX_ACTIVE + 5)
+            .map(|_| store.begin("codex").unwrap())
+            .collect();
+        assert_eq!(store.snapshot().untracked_active, 5);
+        requests[MAX_ACTIVE].finish(Outcome::Success);
+        requests[MAX_ACTIVE + 1]
+            .finish(Outcome::Error(DiagnosticError::new(ErrorClass::Incomplete)));
+        requests[MAX_ACTIVE + 2].finish(Outcome::Error(DiagnosticError::new(ErrorClass::Timeout)));
+        requests[MAX_ACTIVE + 3].finish(Outcome::Cancelled(Reason::ClientDisconnected));
+        requests[MAX_ACTIVE + 4].finish(Outcome::Unconfirmed(Reason::ObservationLimit));
+        let mut status = super::super::types::ProxyStatus::default();
+        store.apply_status(&mut status);
+        assert_eq!(status.total_requests, (MAX_ACTIVE + 5) as u64);
+        assert_eq!(status.pending_requests, MAX_ACTIVE as u64);
+        assert_eq!(
+            (
+                status.success_requests,
+                status.failed_requests,
+                status.timed_out_requests,
+                status.cancelled_requests,
+                status.unconfirmed_requests
+            ),
+            (1, 1, 1, 1, 1)
+        );
+        assert!((status.success_rate - 100.0 / 3.0).abs() < 0.001);
+        store.stop();
+        store.start();
+        let mut current = store.begin("claude").unwrap();
+        // A delayed old Drop cannot decrement the new untracked/pending state.
+        drop(requests);
+        store.apply_status(&mut status);
+        assert_eq!(status.pending_requests, 1);
+        assert_eq!(status.cancelled_requests, (MAX_ACTIVE + 1) as u64);
+        current.finish(Outcome::Success);
+        current.finish(Outcome::Error(DiagnosticError::new(ErrorClass::Internal)));
+        store.apply_status(&mut status);
+        assert_eq!(status.success_requests, 2);
+        assert_eq!(status.failed_requests, 1);
+        assert_eq!(status.pending_requests, 0);
+        assert_eq!(
+            status.total_requests,
+            status.success_requests
+                + status.failed_requests
+                + status.timed_out_requests
+                + status.cancelled_requests
+                + status.unconfirmed_requests
+        );
+    }
 
     #[tokio::test]
     async fn recovery_budget_diagnostic_is_bounded_numeric_metadata_with_timeout_terminal() {

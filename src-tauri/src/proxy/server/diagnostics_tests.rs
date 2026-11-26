@@ -111,6 +111,97 @@ impl Drop for Fixture {
 }
 
 #[tokio::test]
+async fn completion_results_match_wire_bytes_without_replaying_partial_output() {
+    let hits = Arc::new(AtomicUsize::new(0));
+    let router = Router::new().fallback({
+        let hits = hits.clone();
+        move |request: axum::extract::Request| {
+            let hits = hits.clone();
+            async move {
+                hits.fetch_add(1, Ordering::SeqCst);
+                let bytes = axum::body::to_bytes(request.into_body(), 65536).await.unwrap();
+                let body: Value = serde_json::from_slice(&bytes).unwrap();
+                match body["input"][0]["content"].as_str().unwrap() {
+                    "partial-text" => ([("content-type", "text/event-stream")], LATE).into_response(),
+                    "partial-tool" => ([("content-type", "text/event-stream")],
+                        "event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"private-tool\"}\n\n").into_response(),
+                    "json-failure" => Json(json!({"status":"failed","output":[{"type":"message","content":[{"type":"output_text","text":"synthetic output"}]}],"error":{"code":"server_error","message":"private-error"}})).into_response(),
+                    "json-success" => Json(json!({"status":"completed","output":[]})).into_response(),
+                    "oversized" => ([("content-type", "text/event-stream")],
+                        format!("data: {}\n\n", "x".repeat(300 * 1024))).into_response(),
+                    "complete-hold" => {
+                        let stream = async_stream::stream! {
+                            yield Ok::<_, std::io::Error>(bytes::Bytes::from_static(
+                                b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[]}}\n\n"));
+                            std::future::pending::<()>().await;
+                        };
+                        ([("content-type", "text/event-stream")], Body::from_stream(stream)).into_response()
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+    });
+    let fixture = Fixture::start(
+        router,
+        |config| {
+            config.auto_failover_enabled = false;
+            config.same_provider_retries = 2;
+        },
+        false,
+    )
+    .await;
+
+    for (mode, phase) in [
+        ("partial-text", "failed"),
+        ("partial-tool", "failed"),
+        ("json-failure", "failed"),
+        ("json-success", "succeeded"),
+        ("oversized", "unconfirmed"),
+    ] {
+        let response = fixture.request(mode).send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{mode}");
+        let body = response.bytes().await.unwrap();
+        if mode == "partial-text" {
+            assert_eq!(body.as_ref(), LATE.as_bytes());
+        }
+        if mode == "oversized" {
+            assert_eq!(body.len(), 300 * 1024 + 8);
+        }
+        let snapshot = fixture
+            .until(|state| state["active"].as_array().unwrap().is_empty())
+            .await;
+        assert_eq!(snapshot["recent"][0]["current"]["phase"], phase, "{mode}");
+        if mode.starts_with("partial-") {
+            assert_eq!(
+                snapshot["recent"][0]["current"]["error"]["class"],
+                "incomplete"
+            );
+        }
+    }
+    let mut completed = fixture.request("complete-hold").send().await.unwrap();
+    assert!(completed.chunk().await.unwrap().is_some());
+    fixture
+        .until(|state| state["recent"][0]["current"]["phase"] == "succeeded")
+        .await;
+    drop(completed);
+    fixture.proxy.stop().await.unwrap();
+    let status = fixture.proxy.get_status().await;
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        6,
+        "delivered output must not replay"
+    );
+    assert_eq!(status.total_requests, 6);
+    assert_eq!(status.success_requests, 2);
+    assert_eq!(status.failed_requests, 3);
+    assert_eq!(status.unconfirmed_requests, 1);
+    assert_eq!(status.cancelled_requests, 0);
+    assert_eq!(status.pending_requests, 0);
+    assert_eq!(status.success_rate, 40.0);
+}
+
+#[tokio::test]
 async fn concurrent_diagnostics_follow_shared_and_renewed_cooldowns() {
     let hits = Arc::new(AtomicUsize::new(0));
     let router = Router::new().fallback({
@@ -277,12 +368,21 @@ async fn diagnostics_distinguish_failover_output_failure_timeout_and_stop() {
         .until(|state| state["active"][0]["current"]["phase"] == "streaming")
         .await;
     let id = output["active"][0]["id"].clone();
+    assert_eq!(
+        fixture.proxy.get_status().await.success_requests,
+        0,
+        "response headers and partial output are not a completed request"
+    );
     staged.notify_one();
     assert!(response.text().await.unwrap().contains("response.failed"));
     let done = fixture
         .until(|state| state["recent"][0]["current"]["phase"] == "failed")
         .await;
     assert_eq!(done["recent"][0]["id"], id);
+    let status = fixture.proxy.get_status().await;
+    assert_eq!(status.total_requests, 1);
+    assert_eq!(status.success_requests, 0);
+    assert_eq!(status.failed_requests, 1);
     let detail = fixture.detail(&id);
     let steps = detail["steps"].as_array().unwrap();
     assert_eq!(detail["attempts"], 3);
@@ -325,6 +425,10 @@ async fn diagnostics_distinguish_failover_output_failure_timeout_and_stop() {
         fixture.snapshot()["recent"][0]["current"]["phase"],
         "timedOut"
     );
+    let status = fixture.proxy.get_status().await;
+    assert_eq!(status.total_requests, 2);
+    assert_eq!(status.failed_requests, 1);
+    assert_eq!(status.timed_out_requests, 1);
 
     let pending = tokio::spawn(fixture.request("stop-during-send").send());
     let state = fixture
@@ -336,4 +440,9 @@ async fn diagnostics_distinguish_failover_output_failure_timeout_and_stop() {
     let stopped = fixture.detail(&state["active"][0]["id"]);
     assert_eq!(stopped["current"]["phase"], "cancelled");
     assert_eq!(stopped["current"]["reason"], "proxyStopped");
+    let status = fixture.proxy.get_status().await;
+    assert_eq!(status.total_requests, 3);
+    assert_eq!(status.pending_requests, 0);
+    assert_eq!(status.success_requests, 0);
+    assert_eq!(status.cancelled_requests, 1);
 }

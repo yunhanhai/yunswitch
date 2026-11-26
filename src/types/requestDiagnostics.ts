@@ -8,7 +8,8 @@ export type RequestPhase =
   | "succeeded"
   | "failed"
   | "cancelled"
-  | "timedOut";
+  | "timedOut"
+  | "unconfirmed";
 
 export type RequestReason =
   | "retryAfter"
@@ -20,7 +21,9 @@ export type RequestReason =
   | "requestCorrection"
   | "proxyStopped"
   | "clientDisconnected"
-  | "upstreamCancelled";
+  | "upstreamCancelled"
+  | "observationLimit"
+  | "unsupportedResponse";
 
 export type RequestErrorClass =
   | "rateLimited"

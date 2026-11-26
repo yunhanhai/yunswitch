@@ -2880,7 +2880,11 @@
         "activeConnections": "アクティブ接続",
         "totalRequests": "総リクエスト数",
         "successRate": "成功率",
-        "uptime": "稼働時間"
+        "uptime": "稼働時間",
+        "noResults": "結果なし",
+        "requestResults": "リクエスト結果",
+        "pendingRequests": "処理中",
+        "successRateScope": "成功率 = 成功 ÷（成功 + 失敗 + タイムアウト）。処理中、キャンセル済み、結果未確認のリクエストは成功率に含まれません。各リクエストは終了時に一度だけ集計されます。"
       }
     },
     "settings": {
@@ -3113,7 +3117,8 @@
         "succeeded": "成功",
         "failed": "失敗",
         "cancelled": "キャンセル済み",
-        "timedOut": "タイムアウト"
+        "timedOut": "タイムアウト",
+        "unconfirmed": "結果未確認"
       },
       "reasons": {
         "retryAfter": "上流の Retry-After",
@@ -3125,7 +3130,9 @@
         "requestCorrection": "リクエストを修正して再試行",
         "proxyStopped": "プロキシを停止しました",
         "clientDisconnected": "クライアントが切断しました",
-        "upstreamCancelled": "上流が応答をキャンセルしました"
+        "upstreamCancelled": "上流が応答をキャンセルしました",
+        "observationLimit": "応答が確認上限を超えたため、完了を確認できません",
+        "unsupportedResponse": "応答の形式またはエンコードでは結果を確認できません"
       },
       "errors": {
         "rateLimited": "レート制限",
