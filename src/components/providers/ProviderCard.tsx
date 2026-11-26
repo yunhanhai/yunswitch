@@ -46,6 +46,7 @@ import { useUsageQuery } from "@/lib/query/queries";
 import { resolveProviderIcon } from "@/utils/providerIcon";
 import { ProviderStatusBadge } from "@/components/providers/ProviderStatusBadge";
 import { isAdditiveAppId, isProxyAppId } from "@/config/appConfig";
+import { getSharedChannelId } from "@/utils/sharedChannel";
 
 interface DragHandleProps {
   attributes: DraggableAttributes;
@@ -62,6 +63,7 @@ interface ProviderCardProps {
   isOmoSlim?: boolean;
   onSwitch: (provider: Provider) => void;
   onEdit: (provider: Provider) => void;
+  onManageSharedChannel?: (provider: Provider) => void;
   onDelete: (provider: Provider) => void;
   onRemoveFromConfig?: (provider: Provider) => void;
   onDisableOmo?: () => void;
@@ -191,6 +193,7 @@ export function ProviderCard({
   isOmoSlim = false,
   onSwitch,
   onEdit,
+  onManageSharedChannel,
   onDelete,
   onRemoveFromConfig,
   onDisableOmo,
@@ -461,6 +464,22 @@ export function ProviderCard({
               >
                 {provider.name}
               </h3>
+
+              {getSharedChannelId(provider, appId) && onManageSharedChannel && (
+                <button
+                  type="button"
+                  className="inline-flex shrink-0 items-center rounded-md border border-primary/30 bg-primary/5 px-2 py-1 text-xs text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  title={t("universalProvider.manageShared")}
+                  aria-label={t("universalProvider.manageShared")}
+                  data-shared-channel-id={getSharedChannelId(provider, appId)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onManageSharedChannel(provider);
+                  }}
+                >
+                  {t("universalProvider.linkedBadge")}
+                </button>
+              )}
 
               {isOmo && (
                 <span className="inline-flex items-center rounded-md bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">
@@ -775,7 +794,10 @@ export function ProviderCard({
               onConvertToCodex={
                 // 只对有自定义端点的 Claude 第三方供应商开放：官方直连没有
                 // base_url 可转换，转换无意义。
-                appId === "claude" && onConvertToCodex && !isOfficial
+                appId === "claude" &&
+                onConvertToCodex &&
+                !isOfficial &&
+                !getSharedChannelId(provider, appId)
                   ? () => onConvertToCodex(provider)
                   : undefined
               }

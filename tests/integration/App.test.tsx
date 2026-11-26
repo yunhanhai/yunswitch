@@ -216,6 +216,20 @@ describe("App integration with MSW", () => {
     localStorage.removeItem("cc-switch-last-app");
   });
 
+  it("keeps a protected full-screen draft open when the Settings shortcut is pressed", async () => {
+    renderApp(App);
+    await screen.findByTestId("provider-list");
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    try {
+      fireEvent.keyDown(window, { key: ",", ctrlKey: true });
+      fireEvent.keyDown(window, { key: ",", metaKey: true });
+      expect(screen.getByTestId("provider-list")).toBeInTheDocument();
+    } finally {
+      document.body.style.overflow = previousOverflow;
+    }
+  });
+
   it("covers basic provider flows via real hooks", async () => {
     renderApp(App);
 
@@ -311,6 +325,52 @@ describe("App integration with MSW", () => {
     await waitFor(() => {
       expect(toastErrorMock).toHaveBeenCalled();
     });
+  });
+
+  it("does not expose previous-client provider rows while the next client is loading", async () => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.post("http://tauri.local/get_providers", async ({ request }) => {
+        const { app } = (await request.json()) as { app: string };
+        if (app === "codex") {
+          await pending;
+          return HttpResponse.json({
+            "codex-next": {
+              id: "codex-next",
+              name: "Codex next",
+              settingsConfig: {},
+            },
+          });
+        }
+        return HttpResponse.json({
+          "claude-old": {
+            id: "claude-old",
+            name: "Claude old",
+            settingsConfig: { env: {} },
+          },
+        });
+      }),
+    );
+    renderApp(App);
+    await waitFor(() =>
+      expect(screen.getByTestId("provider-list")).toHaveTextContent(
+        "claude-old",
+      ),
+    );
+    fireEvent.click(screen.getByText("switch-codex"));
+    expect(screen.getByTestId("provider-list")).not.toHaveTextContent(
+      "claude-old",
+    );
+    expect(screen.getByTestId("current-provider")).toHaveTextContent(/^$/);
+    release();
+    await waitFor(() =>
+      expect(screen.getByTestId("provider-list")).toHaveTextContent(
+        "codex-next",
+      ),
+    );
   });
 
   it("duplicates openclaw providers with a generated key that avoids live-only ids", async () => {

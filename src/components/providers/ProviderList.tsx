@@ -66,6 +66,7 @@ interface ProviderListProps {
   appId: AppId;
   onSwitch: (provider: Provider) => void;
   onEdit: (provider: Provider) => void;
+  onManageSharedChannel?: (provider: Provider) => void;
   onDelete: (provider: Provider) => void;
   onRemoveFromConfig?: (provider: Provider) => void;
   onDisableOmo?: () => void;
@@ -92,6 +93,7 @@ export function ProviderList({
   appId,
   onSwitch,
   onEdit,
+  onManageSharedChannel,
   onDelete,
   onRemoveFromConfig,
   onDisableOmo,
@@ -613,6 +615,7 @@ export function ProviderList({
                 isOmoSlim={isOmoSlim}
                 onSwitch={onSwitch}
                 onEdit={onEdit}
+                onManageSharedChannel={onManageSharedChannel}
                 onDelete={onDelete}
                 onRemoveFromConfig={onRemoveFromConfig}
                 onDisableOmo={onDisableOmo}
@@ -883,6 +886,7 @@ interface SortableProviderCardProps {
   isOmoSlim: boolean;
   onSwitch: (provider: Provider) => void;
   onEdit: (provider: Provider) => void;
+  onManageSharedChannel?: (provider: Provider) => void;
   onDelete: (provider: Provider) => void;
   onRemoveFromConfig?: (provider: Provider) => void;
   onDisableOmo?: () => void;
@@ -926,6 +930,7 @@ function SortableProviderCard({
   isOmoSlim,
   onSwitch,
   onEdit,
+  onManageSharedChannel,
   onDelete,
   onRemoveFromConfig,
   onDisableOmo,
@@ -1007,6 +1012,7 @@ function SortableProviderCard({
           isOmoSlim={isOmoSlim}
           onSwitch={onSwitch}
           onEdit={onEdit}
+          onManageSharedChannel={onManageSharedChannel}
           onDelete={onDelete}
           onRemoveFromConfig={onRemoveFromConfig}
           onDisableOmo={onDisableOmo}

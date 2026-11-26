@@ -1,5 +1,7 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { render } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import i18n from "i18next";
+import zh from "@/i18n/locales/zh.json";
 import { describe, expect, it, vi } from "vitest";
 import { ProviderCard } from "@/components/providers/ProviderCard";
 import type { Provider } from "@/types";
@@ -50,7 +52,10 @@ const officialClaudeProvider = (): Provider => ({
   settingsConfig: { env: { ANTHROPIC_AUTH_TOKEN: "" } },
 });
 
-function renderCard(provider: Provider) {
+function renderCard(
+  provider: Provider,
+  onManageSharedChannel?: (provider: Provider) => void,
+) {
   providerActionsProps.mockClear();
   const queryClient = createTestQueryClient();
   render(
@@ -62,6 +67,7 @@ function renderCard(provider: Provider) {
         isProxyRunning={false}
         onSwitch={vi.fn()}
         onEdit={vi.fn()}
+        onManageSharedChannel={onManageSharedChannel}
         onDelete={vi.fn()}
         onConfigureUsage={vi.fn()}
         onOpenWebsite={vi.fn()}
@@ -78,6 +84,22 @@ function renderCard(provider: Provider) {
 }
 
 describe("ProviderCard Claude → Codex conversion gating", () => {
+  it("opens the shared settings from the associated channel badge", () => {
+    i18n.addResourceBundle("zh", "translation", zh, true, true);
+    const provider = {
+      ...thirdPartyClaudeProvider(),
+      id: "universal-claude-synthetic",
+      meta: { sharedChannelId: "synthetic" },
+    };
+    const manage = vi.fn();
+    const actions = renderCard(provider, manage);
+    expect(actions.onConvertToCodex).toBeUndefined();
+    fireEvent.click(
+      screen.getByRole("button", { name: zh.universalProvider.manageShared }),
+    );
+    expect(manage).toHaveBeenCalledWith(provider);
+  });
+
   it("wires the convert action for a third-party Claude provider", () => {
     const props = renderCard(thirdPartyClaudeProvider());
 
