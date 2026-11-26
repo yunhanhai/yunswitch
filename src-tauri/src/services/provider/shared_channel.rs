@@ -213,6 +213,17 @@ fn merge_child(
         let new_document = codex_document(&generated)?;
         let old_document = previous.as_ref().map(codex_document).transpose()?;
         let provider_id = codex_provider_id(&document).to_string();
+        // The existing Codex form edits named TOML sections. Canonicalize only
+        // the connection tables while retaining every other advanced field.
+        if let Some(table) = document["model_providers"].as_inline_table().cloned() {
+            document["model_providers"] = toml_edit::Item::Table(table.into_table());
+        }
+        if let Some(table) = document["model_providers"][&provider_id]
+            .as_inline_table()
+            .cloned()
+        {
+            document["model_providers"][&provider_id] = toml_edit::Item::Table(table.into_table());
+        }
         remove_codex_connection_overrides(&mut document, &provider_id);
         document["model_provider"] = toml_edit::value(provider_id.clone());
         for field in ["name", "base_url", "wire_api", "requires_openai_auth"] {
@@ -1366,6 +1377,10 @@ model_providers = {custom = {base_url = 'https://old.example', request_max_retri
         )
         .unwrap();
         let doc = codex_document(&merged).unwrap();
+        assert!(merged.settings_config["config"]
+            .as_str()
+            .unwrap()
+            .contains("[model_providers.custom]"));
         assert_eq!(
             doc["model_providers"]["custom"]["base_url"].as_str(),
             Some("https://synthetic.example/v1")

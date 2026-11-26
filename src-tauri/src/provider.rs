@@ -944,6 +944,8 @@ impl UniversalProvider {
         config["model"] = toml_edit::value(model);
         config["model_reasoning_effort"] = toml_edit::value(reasoning_effort);
         config["disable_response_storage"] = toml_edit::value(true);
+        config["model_providers"] = toml_edit::Item::Table(toml_edit::Table::new());
+        config["model_providers"]["custom"] = toml_edit::Item::Table(toml_edit::Table::new());
         config["model_providers"]["custom"]["name"] = toml_edit::value(self.name.clone());
         config["model_providers"]["custom"]["base_url"] = toml_edit::value(codex_base_url);
         // Codex clients always speak Responses. The upstream protocol belongs
@@ -1388,6 +1390,7 @@ mod tests {
             .expect("config toml");
 
         assert!(config.contains("base_url = \"https://api.example.com/v1\""));
+        assert!(config.contains("[model_providers.custom]"));
         assert_eq!(
             provider
                 .settings_config
