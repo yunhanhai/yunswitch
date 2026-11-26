@@ -1437,20 +1437,20 @@ impl ProxyService {
         app_type: &AppType,
         provider: &Provider,
     ) -> Result<bool, String> {
-        if provider
+        let prefix = format!("universal-{}-", app_type.as_str());
+        let Some(id) = provider
             .meta
             .as_ref()
-            .is_some_and(|meta| meta.shared_channel_id.is_some())
-        {
-            return Ok(true);
-        }
-        let prefix = format!("universal-{}-", app_type.as_str());
-        let Some(id) = provider.id.strip_prefix(&prefix) else {
+            .and_then(|meta| meta.shared_channel_id.as_deref())
+            .or_else(|| provider.id.strip_prefix(&prefix))
+        else {
             return Ok(false);
         };
         self.db
             .get_universal_provider(id)
-            .map(|channel| channel.is_some())
+            .map(|channel| {
+                channel.is_some_and(|channel| channel.child_id(app_type.as_str()) == provider.id)
+            })
             .map_err(|_| "Unable to read shared channel binding".to_string())
     }
 

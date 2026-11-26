@@ -15,11 +15,11 @@ pub struct SharedChannelSaveResult {
     pub failed_apps: Vec<String>,
 }
 
-fn apps() -> [AppType; 3] {
+pub(super) fn apps() -> [AppType; 3] {
     [AppType::Claude, AppType::Codex, AppType::Gemini]
 }
 
-fn child(channel: &UniversalProvider, app: &AppType) -> Option<Provider> {
+pub(super) fn child(channel: &UniversalProvider, app: &AppType) -> Option<Provider> {
     match app {
         AppType::Claude => channel.to_claude_provider(),
         AppType::Codex => channel.to_codex_provider(),
@@ -47,7 +47,7 @@ fn uses_managed_auth(meta: &crate::provider::ProviderMeta) -> bool {
         )
 }
 
-fn validate(channel: &UniversalProvider) -> Result<(), AppError> {
+pub(super) fn validate(channel: &UniversalProvider) -> Result<(), AppError> {
     if channel.id.trim().is_empty()
         || channel.id.chars().any(|c| c.is_control())
         || channel.name.trim().is_empty()
@@ -95,6 +95,13 @@ fn validate(channel: &UniversalProvider) -> Result<(), AppError> {
         }
         if let Some(connection) = connection {
             if connection
+                .api_key_field
+                .as_deref()
+                .is_some_and(|field| !matches!(field, "ANTHROPIC_API_KEY" | "ANTHROPIC_AUTH_TOKEN"))
+            {
+                return Err(invalid_channel());
+            }
+            if connection
                 .base_url
                 .as_deref()
                 .is_some_and(|url| !url.trim().is_empty() && !valid_url(url.trim()))
@@ -113,7 +120,7 @@ fn validate(channel: &UniversalProvider) -> Result<(), AppError> {
     Ok(())
 }
 
-fn codex_document(provider: &Provider) -> Result<toml_edit::DocumentMut, AppError> {
+pub(super) fn codex_document(provider: &Provider) -> Result<toml_edit::DocumentMut, AppError> {
     let invalid = || {
         AppError::localized(
             "shared_channel.invalid_codex_config",
@@ -140,7 +147,7 @@ fn codex_document(provider: &Provider) -> Result<toml_edit::DocumentMut, AppErro
     Ok(document)
 }
 
-fn codex_provider_id(document: &toml_edit::DocumentMut) -> &str {
+pub(super) fn codex_provider_id(document: &toml_edit::DocumentMut) -> &str {
     document
         .get("model_provider")
         .and_then(toml_edit::Item::as_str)
@@ -196,7 +203,7 @@ fn remove_codex_connection_overrides(document: &mut toml_edit::DocumentMut, prov
 
 /// Only fields owned by the channel are patched. Models are updated when the
 /// master field changes; independent child model choices survive key rotation.
-fn merge_child(
+pub(super) fn merge_child(
     app: &AppType,
     generated: Provider,
     previous: Option<Provider>,
@@ -205,6 +212,11 @@ fn merge_child(
     let Some(mut merged) = existing else {
         return Ok(generated);
     };
+    let adopted = generated
+        .meta
+        .as_ref()
+        .and_then(|meta| meta.shared_channel_id.as_deref())
+        .is_some_and(|id| generated.id != format!("universal-{}-{id}", app.as_str()));
     if !merged.settings_config.is_object() {
         return Err(invalid_channel());
     }
@@ -233,14 +245,22 @@ fn merge_child(
         remove_codex_connection_overrides(&mut document, &provider_id);
         document["model_provider"] = toml_edit::value(provider_id.clone());
         for field in ["name", "base_url", "wire_api", "requires_openai_auth"] {
-            document["model_providers"][&provider_id][field] =
-                new_document["model_providers"]["custom"][field].clone();
+            if adopted && field == "name" {
+                continue;
+            }
+            if let Some(value) = new_document["model_providers"]["custom"].get(field) {
+                document["model_providers"][&provider_id][field] = value.clone();
+            } else if let Some(table) =
+                document["model_providers"][&provider_id].as_table_like_mut()
+            {
+                table.remove(field);
+            }
         }
         for field in ["model", "model_reasoning_effort"] {
             if old_document.as_ref().is_some_and(|old| {
                 old.get(field).and_then(toml_edit::Item::as_str)
                     != new_document.get(field).and_then(toml_edit::Item::as_str)
-            }) || document.get(field).is_none()
+            }) || (!adopted && document.get(field).is_none())
             {
                 document[field] = new_document[field].clone();
             }
@@ -292,7 +312,10 @@ fn merge_child(
             let changed = previous
                 .as_ref()
                 .is_some_and(|old| old.settings_config["env"].get(key) != Some(value));
-            if !model_field || changed || merged.settings_config["env"].get(key).is_none() {
+            if !model_field
+                || changed
+                || (!adopted && merged.settings_config["env"].get(key).is_none())
+            {
                 merged.settings_config["env"][key] = value.clone();
             }
         }
@@ -300,13 +323,24 @@ fn merge_child(
             merged.settings_config["env"]
                 .as_object_mut()
                 .expect("env")
-                .remove("ANTHROPIC_API_KEY");
+                .remove(
+                    if generated.settings_config["env"]
+                        .get("ANTHROPIC_API_KEY")
+                        .is_some()
+                    {
+                        "ANTHROPIC_AUTH_TOKEN"
+                    } else {
+                        "ANTHROPIC_API_KEY"
+                    },
+                );
         }
     }
-    merged.name = generated.name;
-    merged.website_url = generated.website_url;
-    merged.icon = generated.icon;
-    merged.icon_color = generated.icon_color;
+    if !adopted {
+        merged.name = generated.name;
+        merged.website_url = generated.website_url;
+        merged.icon = generated.icon;
+        merged.icon_color = generated.icon_color;
+    }
     let generated_meta = generated.meta.unwrap_or_default();
     let meta = merged.meta.get_or_insert_with(Default::default);
     meta.shared_channel_id = generated_meta.shared_channel_id;
@@ -318,7 +352,11 @@ fn merge_child(
         meta.provider_type = None;
     }
     if *app == AppType::Claude {
-        meta.api_key_field = Some("ANTHROPIC_AUTH_TOKEN".to_string());
+        meta.api_key_field = Some(
+            generated_meta
+                .api_key_field
+                .unwrap_or_else(|| "ANTHROPIC_AUTH_TOKEN".to_string()),
+        );
     }
     Ok(merged)
 }
@@ -425,6 +463,7 @@ impl ProviderService {
             .as_ref()
             .and_then(|meta| meta.api_format.clone());
         for app in apps() {
+            let child_id = provider.child_id(app.as_str());
             let (connection, default_format) = match app {
                 AppType::Claude => (&mut provider.connections.claude, "anthropic"),
                 AppType::Codex => (&mut provider.connections.codex, "openai_responses"),
@@ -436,10 +475,7 @@ impl ProviderService {
             {
                 continue;
             }
-            let existing = state.db.get_provider_by_id(
-                &format!("universal-{}-{}", app.as_str(), provider.id),
-                app.as_str(),
-            )?;
+            let existing = state.db.get_provider_by_id(&child_id, app.as_str())?;
             let old_child_format = existing
                 .filter(|existing| {
                     existing
@@ -580,11 +616,20 @@ impl ProviderService {
         let _codex = futures::executor::block_on(state.proxy_service.lock_switch_for_app("codex"));
         let _gemini =
             futures::executor::block_on(state.proxy_service.lock_switch_for_app("gemini"));
+        let previous = Self::get_universal(state, &provider.id)?;
+        if previous
+            .as_ref()
+            .map(|old| &old.child_ids)
+            .unwrap_or(&HashMap::new())
+            != &provider.child_ids
+        {
+            return Err(invalid_channel());
+        }
         Self::save_shared_channel_locked(state, provider)
     }
 
     /// The caller holds all three app switch locks before reading the master.
-    fn save_shared_channel_locked(
+    pub(super) fn save_shared_channel_locked(
         state: &AppState,
         mut provider: UniversalProvider,
     ) -> Result<SharedChannelSaveResult, AppError> {
@@ -594,9 +639,20 @@ impl ProviderService {
         let mut children = Vec::new();
         let mut removed_apps = Vec::new();
         for app in apps() {
-            let child_id = format!("universal-{}-{}", app.as_str(), provider.id);
+            let child_id = provider.child_id(app.as_str());
             if let Some(generated) = child(&provider, &app) {
                 let existing = state.db.get_provider_by_id(&child_id, app.as_str())?;
+                if provider.has_adopted_child(app.as_str())
+                    && existing.as_ref().is_none_or(|existing| {
+                        existing
+                            .meta
+                            .as_ref()
+                            .and_then(|meta| meta.shared_channel_id.as_deref())
+                            != Some(&provider.id)
+                    })
+                {
+                    return Err(invalid_channel());
+                }
                 let merged = merge_child(
                     &app,
                     generated,
@@ -606,15 +662,25 @@ impl ProviderService {
                 Self::validate_provider_settings(&app, &merged)?;
                 children.push((app.as_str().to_string(), merged));
             } else {
-                if crate::settings::get_current_provider(&app).as_deref() == Some(&child_id) {
+                if !provider.has_adopted_child(app.as_str())
+                    && crate::settings::get_current_provider(&app).as_deref() == Some(&child_id)
+                {
                     return Err(shared_channel_in_use());
                 }
                 removed_apps.push(app.as_str().to_string());
+                provider.child_ids.remove(app.as_str());
             }
         }
         state
             .db
             .save_shared_channel_children(&provider, &children, &removed_apps)?;
+        Self::project_shared_children(state, children)
+    }
+
+    pub(super) fn project_shared_children(
+        state: &AppState,
+        children: Vec<(String, Provider)>,
+    ) -> Result<SharedChannelSaveResult, AppError> {
         let mut result = SharedChannelSaveResult {
             saved: true,
             synced_apps: Vec::new(),
@@ -678,7 +744,14 @@ impl ProviderService {
         let _codex = futures::executor::block_on(state.proxy_service.lock_switch_for_app("codex"));
         let _gemini =
             futures::executor::block_on(state.proxy_service.lock_switch_for_app("gemini"));
+        let channel = Self::get_universal(state, id)?;
         for app in apps() {
+            if channel
+                .as_ref()
+                .is_some_and(|channel| channel.has_adopted_child(app.as_str()))
+            {
+                continue;
+            }
             if crate::settings::get_current_provider(&app).as_deref()
                 == Some(&format!("universal-{}-{id}", app.as_str()))
             {
@@ -757,7 +830,7 @@ impl ProviderService {
             }
             return Ok(());
         };
-        if existing.id != format!("universal-{}-{}", app.as_str(), channel.id)
+        if existing.id != channel.child_id(app.as_str())
             || updated.id != existing.id
             || updated
                 .meta
@@ -823,20 +896,33 @@ impl ProviderService {
                 || updated.settings_config["auth"]["OPENAI_API_KEY"]
                     != expected.settings_config["auth"]["OPENAI_API_KEY"]
         } else {
+            let claude_key_field = if expected.settings_config["env"]
+                .get("ANTHROPIC_API_KEY")
+                .is_some()
+            {
+                "ANTHROPIC_API_KEY"
+            } else {
+                "ANTHROPIC_AUTH_TOKEN"
+            };
+            let other_key_field = if claude_key_field == "ANTHROPIC_API_KEY" {
+                "ANTHROPIC_AUTH_TOKEN"
+            } else {
+                "ANTHROPIC_API_KEY"
+            };
             if *app == AppType::Claude
                 && (updated.settings_config["env"]
-                    .get("ANTHROPIC_API_KEY")
+                    .get(other_key_field)
                     .is_some()
                     || updated
                         .meta
                         .as_ref()
                         .and_then(|meta| meta.api_key_field.as_deref())
-                        .is_some_and(|field| field != "ANTHROPIC_AUTH_TOKEN"))
+                        .is_some_and(|field| field != claude_key_field))
             {
                 return Err(invalid_channel());
             }
             let keys = if *app == AppType::Claude {
-                ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"]
+                ["ANTHROPIC_BASE_URL", claude_key_field]
             } else {
                 ["GOOGLE_GEMINI_BASE_URL", "GEMINI_API_KEY"]
             };
@@ -854,6 +940,15 @@ impl ProviderService {
         let meta = updated.meta.get_or_insert_with(Default::default);
         meta.shared_channel_id = Some(channel.id);
         meta.api_format = expected_format.map(str::to_string);
+        if *app == AppType::Claude {
+            meta.api_key_field = Some(
+                expected
+                    .meta
+                    .as_ref()
+                    .and_then(|meta| meta.api_key_field.clone())
+                    .unwrap_or_else(|| "ANTHROPIC_AUTH_TOKEN".into()),
+            );
+        }
         Ok(())
     }
 }
@@ -904,6 +999,8 @@ mod tests {
         updated.connections.codex = Some(SharedChannelConnection {
             base_url: Some("https://synthetic.example/prefix".into()),
             api_format: Some("openai_chat".into()),
+            api_key_field: None,
+            requires_openai_auth: None,
         });
         let merged = merge_child(
             &AppType::Codex,
@@ -973,6 +1070,8 @@ mod tests {
         channel.connections.codex = Some(SharedChannelConnection {
             base_url: Some("https://synthetic.example/custom".into()),
             api_format: None,
+            api_key_field: None,
+            requires_openai_auth: None,
         });
         let preview = ProviderService::preview_shared_channel(channel).unwrap();
         let serialized = serde_json::to_string(&preview).unwrap();
@@ -1597,6 +1696,8 @@ model_providers = {custom = {base_url = 'https://old.example', request_max_retri
             channel.connections.codex = Some(SharedChannelConnection {
                 base_url: Some("https://synthetic.example/codex".into()),
                 api_format: None,
+                api_key_field: None,
+                requires_openai_auth: None,
             });
             state.db.save_universal_provider(&channel).unwrap();
             let loaded = ProviderService::get_universal(state, &channel.id)
@@ -1686,6 +1787,8 @@ model_providers = {custom = {base_url = 'https://old.example', request_max_retri
                 channel.connections.codex = Some(SharedChannelConnection {
                     base_url: None,
                     api_format: Some(format.into()),
+                    api_key_field: None,
+                    requires_openai_auth: None,
                 });
                 let preview = ProviderService::preview_shared_channel(channel.clone()).unwrap();
                 assert_eq!(

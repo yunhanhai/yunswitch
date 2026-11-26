@@ -601,10 +601,12 @@ export interface UniversalProviderConnections {
   claude?: {
     baseUrl?: string;
     apiFormat?: ProviderMeta["apiFormat"];
+    apiKeyField?: "ANTHROPIC_AUTH_TOKEN" | "ANTHROPIC_API_KEY";
   };
   codex?: {
     baseUrl?: string;
     apiFormat?: "openai_responses" | "openai_chat" | "anthropic";
+    requiresOpenaiAuth?: boolean;
   };
   gemini?: { baseUrl?: string };
 }
@@ -613,6 +615,49 @@ export interface SharedChannelSaveResult {
   saved: true;
   syncedApps: SharedChannelApp[];
   failedApps: SharedChannelApp[];
+}
+
+export type SharedChannelLinkApp = "claude" | "codex";
+
+export interface SharedChannelLinkCandidate {
+  id: string;
+  name: string;
+  eligible: boolean;
+  reason?: "already_linked" | "managed_auth" | "unsupported_config";
+}
+
+export type SharedChannelLinkCandidates = Record<
+  SharedChannelLinkApp,
+  SharedChannelLinkCandidate[]
+>;
+
+export interface SharedChannelLinkRequest {
+  channelId: string;
+  name: string;
+  claudeProviderId: string;
+  codexProviderId: string;
+  keySource: SharedChannelLinkApp;
+}
+
+export interface SharedChannelLinkPreview {
+  token: string;
+  credentialsDiffer: boolean;
+  keySource: SharedChannelLinkApp;
+  apps: {
+    app: SharedChannelLinkApp;
+    providerId: string;
+    name: string;
+    baseUrl: string;
+    apiFormat: string;
+    model?: string;
+    current: boolean;
+  }[];
+  /** Unix timestamp in milliseconds; the backend also enforces this deadline. */
+  expiresAt: number;
+}
+
+export interface SharedChannelLinkResult extends SharedChannelSaveResult {
+  channelId: string;
 }
 
 // 统一供应商（跨应用共享配置）
@@ -625,6 +670,8 @@ export interface UniversalProvider {
   apiKey: string;
   models: UniversalProviderModels;
   connections?: UniversalProviderConnections;
+  /** Explicitly linked existing providers keep their original IDs. */
+  childIds?: Partial<Record<SharedChannelApp, string>>;
   websiteUrl?: string;
   notes?: string;
   icon?: string;

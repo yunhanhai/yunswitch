@@ -76,6 +76,17 @@ pub fn update_endpoint_last_used(
 ) -> Result<(), AppError> {
     let normalized = url.trim().trim_end_matches('/').to_string();
 
+    // Endpoint metadata uses the same provider save path. Serialize its read
+    // and write with adoption/key rotation so it cannot restore an old row.
+    let _shared_endpoint_guard =
+        if matches!(app_type, AppType::Claude | AppType::Codex | AppType::Gemini) {
+            Some(futures::executor::block_on(
+                state.proxy_service.lock_switch_for_app(app_type.as_str()),
+            ))
+        } else {
+            None
+        };
+
     // Get provider, update last_used, save back
     let mut providers = state.db.get_all_providers(app_type.as_str())?;
     if let Some(provider) = providers.get_mut(provider_id) {

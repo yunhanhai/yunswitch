@@ -67,6 +67,53 @@ fn remove_child(conn: &Connection, app: &str, id: &str) -> Result<(), AppError> 
     Ok(())
 }
 
+/// Imported rows retain their identity, current selection and references.
+fn release_child(
+    tx: &rusqlite::Transaction<'_>,
+    channel: &UniversalProvider,
+    app: &str,
+) -> Result<(), AppError> {
+    let id = channel.child_id(app);
+    if channel.has_adopted_child(app) {
+        if let Some(mut child) = Database::get_provider_in_connection(tx, &id, app)? {
+            if child
+                .meta
+                .as_ref()
+                .and_then(|meta| meta.shared_channel_id.as_deref())
+                != Some(&channel.id)
+            {
+                return Err(AppError::Message("Invalid shared channel binding".into()));
+            }
+            child
+                .meta
+                .get_or_insert_with(Default::default)
+                .shared_channel_id = None;
+            Database::save_provider_in_transaction(tx, app, &child)?;
+        }
+        Ok(())
+    } else {
+        let enabled = match app {
+            "claude" => channel.apps.claude,
+            "codex" => channel.apps.codex,
+            "gemini" => channel.apps.gemini,
+            _ => false,
+        };
+        if !enabled {
+            return Ok(());
+        }
+        if Database::get_provider_in_connection(tx, &id, app)?.is_some_and(|child| {
+            child
+                .meta
+                .as_ref()
+                .and_then(|meta| meta.shared_channel_id.as_deref())
+                .is_some_and(|owner| owner != channel.id)
+        }) {
+            return Err(AppError::Message("Invalid shared channel binding".into()));
+        }
+        remove_child(tx, app, &id)
+    }
+}
+
 impl Database {
     pub fn get_all_universal_providers(
         &self,
@@ -106,10 +153,12 @@ impl Database {
         let tx = conn
             .transaction()
             .map_err(|error| AppError::Database(error.to_string()))?;
-        for app in removed_apps {
-            remove_child(&tx, app, &format!("universal-{app}-{}", provider.id))?;
-        }
         let mut channels = read_channels(&tx)?;
+        if let Some(previous) = channels.get(&provider.id) {
+            for app in removed_apps {
+                release_child(&tx, previous, app)?;
+            }
+        }
         channels.insert(provider.id.clone(), provider.clone());
         write_channels(&tx, &channels)?;
         for (app, child) in children {
@@ -119,15 +168,57 @@ impl Database {
             .map_err(|error| AppError::Database(error.to_string()))
     }
 
+    /// Compare both source rows in the same transaction as the relationship write.
+    pub(crate) fn link_shared_channel_children(
+        &self,
+        channel: &UniversalProvider,
+        original: &[(String, Provider)],
+        children: &[(String, Provider)],
+    ) -> Result<(), AppError> {
+        let mut conn = lock_conn!(self.conn);
+        let tx = conn.transaction()?;
+        let mut channels = read_channels(&tx)?;
+        let conflict = || {
+            AppError::localized(
+                "shared_channel.link_stale",
+                "配置已变化，请重新预览后关联。",
+                "Configuration changed. Preview the link again.",
+            )
+        };
+        if channels.contains_key(&channel.id) {
+            return Err(conflict());
+        }
+        for (app, provider) in original {
+            let current =
+                Self::get_provider_in_connection(&tx, &provider.id, app)?.ok_or_else(conflict)?;
+            if serde_json::to_value(&current).ok() != serde_json::to_value(provider).ok()
+                || channels
+                    .values()
+                    .any(|existing| existing.child_id(app) == provider.id)
+            {
+                return Err(conflict());
+            }
+        }
+        channels.insert(channel.id.clone(), channel.clone());
+        write_channels(&tx, &channels)?;
+        for (app, child) in children {
+            Self::save_provider_in_transaction(&tx, app, child)?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     pub(crate) fn delete_shared_channel_children(&self, id: &str) -> Result<bool, AppError> {
         let mut conn = lock_conn!(self.conn);
         let tx = conn
             .transaction()
             .map_err(|error| AppError::Database(error.to_string()))?;
-        for app in ["claude", "codex", "gemini"] {
-            remove_child(&tx, app, &format!("universal-{app}-{id}"))?;
-        }
         let mut channels = read_channels(&tx)?;
+        if let Some(channel) = channels.get(id) {
+            for app in ["claude", "codex", "gemini"] {
+                release_child(&tx, channel, app)?;
+            }
+        }
         let existed = channels.remove(id).is_some();
         write_channels(&tx, &channels)?;
         tx.commit()

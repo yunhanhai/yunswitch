@@ -32,6 +32,18 @@ describe("shared channel bindings", () => {
         { id: "ordinary", meta: { sharedChannelId: "relay" } },
         "claude",
       ),
+    ).toBe("relay");
+    expect(
+      getSharedChannelId(
+        { id: "ordinary", meta: { sharedChannelId: " " } },
+        "codex",
+      ),
+    ).toBeUndefined();
+    expect(
+      getSharedChannelId(
+        { id: "ordinary", meta: { sharedChannelId: "relay" } },
+        "opencode",
+      ),
     ).toBeUndefined();
     expect(
       getSharedChannelId({ id: "universal-claude-relay" }, "codex"),
