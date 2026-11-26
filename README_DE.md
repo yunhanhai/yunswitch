@@ -6,7 +6,7 @@ Konfiguration und lokales Routing für KI-Coding-Werkzeuge, über mehrere Anbiet
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2-orange.svg)](https://tauri.app/)
-[![Windows x64 prerelease](https://img.shields.io/badge/Windows_x64-Prerelease-blue.svg)](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.8)
+[![Windows x64 prerelease](https://img.shields.io/badge/Windows_x64-Prerelease-blue.svg)](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.9)
 
 [English](README.md) | [中文](README_ZH.md) | [日本語](README_JA.md) | Deutsch
 
@@ -28,17 +28,15 @@ Das Projekt wird **eigenständig von yunhanhai gepflegt** und basiert auf [CC Sw
 
 ## Download und Einstieg
 
-**Nächste Version in Vorbereitung:** [`3.20.1-yunswitch.9`](docs/releases/3.20.1-yunswitch.9.md) bündelt gemeinsame Kanäle für Claude Code und Codex, die Verknüpfung vorhandener Konfigurationen, bereinigte Anfragediagnosen und Informationen zur Build-Herkunft in einem neuen Windows-Paket. Das neue Paket und das Upgrade von `.8` haben 206 Prüfungen bestanden. Die Veröffentlichung wird abgeschlossen; die öffentlichen Downloads unten bleiben vorerst bei `.8`.
-
-Aktuelle Version: **`3.20.1-yunswitch.8` als Windows-x64-Vorabversion**, mit MSI-Installer und portabler ZIP.
+Aktuelle Version: **`3.20.1-yunswitch.9` als Windows-x64-Vorabversion**, mit MSI-Installer und portabler ZIP.
 
 | Plattform     | Bezug und Prüfstand                                                                                                                                                                                                            |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Windows x64   | [GitHub](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.8) · [Gitee](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.8); Installation, Upgrade von `.7` und Deinstallation geprüft |
-| macOS / Linux | [Quellcode-CI](https://github.com/yunhanhai/yunswitch/actions/runs/43592579771) erfolgreich; eigenständige Pakete und Installationsprüfung stehen aus                                                                          |
+| Windows x64   | [GitHub](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.9) · [Gitee](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.9); Installation, Upgrade von `.8` und Deinstallation geprüft |
+| macOS / Linux | [Quellcode-CI](https://github.com/yunhanhai/yunswitch/actions/runs/45871888586) erfolgreich; eigenständige Pakete und Installationsprüfung stehen aus                                                                          |
 | ARM64         | Noch keine eigenständigen Pakete oder Installationsprüfung                                                                                                                                                                     |
 
-Version `.8` koordiniert Wiederholungen nach Ratenlimits, berücksichtigt verlängerte gemeinsame Wartefristen und begrenzt Wartezeiten. **1569 lokale Proxy-Regressionstests** und **[88 Windows-Laufzeitprüfungen](https://github.com/yunhanhai/yunswitch/actions/runs/43592678793)** bestanden. Details enthält der [Veröffentlichungsnachweis](docs/releases/3.20.1-yunswitch.8.md).
+Version `.9` bietet gemeinsame Kanäle für Claude Code und Codex, die Verknüpfung vorhandener Konfigurationen, bereinigte Anfragediagnosen, Anfragebudgets, Abschlussstatistiken und Build-Herkunft. **1153 Frontend-Tests** und **[206 Windows-Laufzeitprüfungen](https://github.com/yunhanhai/yunswitch/actions/runs/45871920781)** einschließlich Upgrade von `.8` bestanden. Details stehen im [Veröffentlichungsnachweis](docs/releases/3.20.1-yunswitch.9.md).
 
 Die Windows-Pakete sind nicht signiert; automatische Updates sind deaktiviert. Updates stehen auf den oben verlinkten Release-Seiten. Vor der Übernahme vorhandener Einstellungen die [Migrationsanleitung](docs/MIGRATION-YUNSWITCH.md) lesen.
 
@@ -87,7 +85,7 @@ Einstellungen und Verhalten erläutern [Wiederherstellung](docs/CODEX-STREAM-REC
 | Einstellungen umwandeln           | [Claude → Codex](docs/claude-to-codex-conversion.md)                                                                                                                                                    |
 | Andere Anbieter nutzen            | [Kimi mit Codex](docs/guides/codex-kimi-routing-guide-en.md) · [Claude mit Codex](docs/guides/codex-claude-routing-guide-en.md) · [Codex mit Claude Code](docs/guides/claude-codex-routing-guide-en.md) |
 | Modelle in Codex Desktop anzeigen | [Eigene Modelle](docs/guides/codex-desktop-custom-model-visibility-en.md)                                                                                                                               |
-| Migrieren und aktualisieren       | [Migration](docs/MIGRATION-YUNSWITCH.md) · [Veröffentlichungsnachweis](docs/releases/3.20.1-yunswitch.8.md)                                                                                             |
+| Migrieren und aktualisieren       | [Migration](docs/MIGRATION-YUNSWITCH.md) · [Veröffentlichungsnachweis](docs/releases/3.20.1-yunswitch.9.md)                                                                                             |
 | Pläne und Herkunft prüfen         | [Entwicklungsplan](docs/DEVELOPMENT-ROADMAP.md) · [Projektinformationen](docs/PROJECT.md) · [Quellenverzeichnis](docs/PROVENANCE.md)                                                                    |
 
 Einige technische Unterlagen sind auf Chinesisch oder Englisch. Die [Änderungsübersicht](CHANGELOG.md) führt frühere Versionen und Prüfnachweise auf. Installationshinweise des Ursprungsprojekts in älteren Handbüchern dienen als historische Referenz; für dieses Projekt die eigenen Releases verwenden.
@@ -109,7 +107,7 @@ Alternativ von `https://github.com/yunhanhai/yunswitch.git` klonen. Die Entwickl
 
 Das Projekt wird derzeit von einer Person gepflegt. Fragen und Vorschläge über [Gitee Issues](https://gitee.com/yunhanhai/yunswitch/issues) oder [GitHub Issues](https://github.com/yunhanhai/yunswitch/issues) einreichen. Codebeiträge beschreibt [CONTRIBUTING.md](CONTRIBUTING.md), Sicherheitsberichte [SECURITY.md](SECURITY.md).
 
-Anfragediagnosen und gemeinsame Kanäle sind implementiert und haben ihre jeweiligen Quellcode- und Build-only-Prüfungen bestanden. Zunächst wird `.9` mit erkennbarer Build-Herkunft geprüft und veröffentlicht. Danach folgen gezielte Verbesserungen am Schutz von Formularentwürfen sowie Prüfungen mit echten Anbietern und langen Sitzungen. Umfang und Abnahmekriterien stehen im [Entwicklungsplan](docs/DEVELOPMENT-ROADMAP.md).
+Anfragediagnosen und gemeinsame Kanäle sind implementiert und haben ihre jeweiligen Quellcode- und Build-only-Prüfungen bestanden. Version `.9` mit erkennbarer Build-Herkunft ist veröffentlicht. Als Nächstes folgen gezielte Verbesserungen am Schutz von Formularentwürfen sowie Prüfungen mit echten Anbietern und langen Sitzungen. Umfang und Abnahmekriterien stehen im [Entwicklungsplan](docs/DEVELOPMENT-ROADMAP.md).
 
 ## Herkunft und Lizenz
 

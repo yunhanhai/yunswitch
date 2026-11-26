@@ -6,7 +6,7 @@ AI 编程工具配置与路由管理，统一管理多供应商、多模型与�
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2-orange.svg)](https://tauri.app/)
-[![Windows x64 prerelease](https://img.shields.io/badge/Windows_x64-Prerelease-blue.svg)](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.8)
+[![Windows x64 prerelease](https://img.shields.io/badge/Windows_x64-Prerelease-blue.svg)](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.9)
 
 [English](README.md) | 中文 | [日本語](README_JA.md) | [Deutsch](README_DE.md)
 
@@ -28,17 +28,15 @@ YunSwitch 帮助你管理 Claude Code、Codex、Gemini CLI 等工具的供应商
 
 ## 下载与快速开始
 
-**新版本准备中：**[`3.20.1-yunswitch.9`](docs/releases/3.20.1-yunswitch.9.md) 将共享 Claude Code / Codex 渠道、关联已有配置、脱敏请求诊断和构建来源纳入新的 Windows 安装包。新包及 `.8` 升级验收已通过 206 项，正在完成发布，下方公开下载暂保持为 `.8`。
-
-当前版本：**`3.20.1-yunswitch.8` Windows x64 预发布**，提供 MSI 安装版与免安装 ZIP。
+当前版本：**`3.20.1-yunswitch.9` Windows x64 预发布**，提供 MSI 安装版与免安装 ZIP。
 
 | 平台          | 获取方式与验证状态                                                                                                                                                                                            |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Windows x64   | [Gitee 下载](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.8) · [GitHub 下载](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.8)；安装、从 `.7` 升级与卸载已验收 |
-| macOS / Linux | [源码 CI](https://github.com/yunhanhai/yunswitch/actions/runs/43592579771)通过，尚无独立安装包及安装验收                                                                                                      |
+| Windows x64   | [Gitee 下载](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.9) · [GitHub 下载](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.9)；安装、从 `.8` 升级与卸载已验收 |
+| macOS / Linux | [源码 CI](https://github.com/yunhanhai/yunswitch/actions/runs/45871888586)通过，尚无独立安装包及安装验收                                                                                                      |
 | ARM64         | 尚无独立安装包或安装验收                                                                                                                                                                                      |
 
-本版协调已限流请求的恢复顺序，动态遵守共享冷却期限，并限制排队和等待时长。本机 **1569 项代理回归**及 **[88 项 Windows 运行检查](https://github.com/yunhanhai/yunswitch/actions/runs/43592678793)**通过，完整记录见[本次发布说明](docs/releases/3.20.1-yunswitch.8.md)。
+本版支持一次维护 Claude Code / Codex 共享渠道及关联已有配置，包含脱敏请求诊断、请求预算、准确终态统计和构建来源。**1153 项前端测试**及 **[206 项 Windows 运行检查](https://github.com/yunhanhai/yunswitch/actions/runs/45871920781)**通过，包含从 `.8` 升级。完整证据见[发布说明](docs/releases/3.20.1-yunswitch.9.md)。
 
 Windows 包尚未配置发布者签名，自动更新关闭。更新时请从上方本项目发布入口下载；使用旧配置前先阅读[数据迁移指南](docs/MIGRATION-YUNSWITCH.md)。
 
@@ -88,7 +86,7 @@ Windows x64 `.8` 发布验收中的 Codex 加密历史兼容设置。该开关�
 | 使用跨供应商路由            | [Codex 接入 Kimi](docs/guides/codex-kimi-routing-guide-zh.md) · [Codex 接入 Claude](docs/guides/codex-claude-routing-guide-zh.md) · [Claude Code 接入 Codex](docs/guides/claude-codex-routing-guide-zh.md) |
 | 在 Codex Desktop 中显示模型 | [自定义模型显示](docs/guides/codex-desktop-custom-model-visibility-zh.md)                                                                                                                                  |
 | 处理限流或历史兼容问题      | [请求恢复](docs/CODEX-STREAM-RECOVERY.md) · [加密历史兼容](docs/CODEX-RESPONSES-COMPATIBILITY.md)                                                                                                          |
-| 迁移与升级                  | [数据迁移指南](docs/MIGRATION-YUNSWITCH.md) · [当前发布记录](docs/releases/3.20.1-yunswitch.8.md)                                                                                                          |
+| 迁移与升级                  | [数据迁移指南](docs/MIGRATION-YUNSWITCH.md) · [当前发布记录](docs/releases/3.20.1-yunswitch.9.md)                                                                                                          |
 | 了解开发计划与来源          | [开发路线](docs/DEVELOPMENT-ROADMAP.md) · [项目说明](docs/PROJECT.md) · [来源台账](docs/PROVENANCE.md)                                                                                                     |
 
 [更新记录](CHANGELOG.md)保留各版本变化与历史验证入口。旧手册和开发记录中的上游安装信息供历史参考，安装与更新以本项目实际发布说明为准。
@@ -132,7 +130,7 @@ GitHub 也可以作为克隆来源：`https://github.com/yunhanhai/yunswitch.git
 
 本项目目前由一人维护，欢迎通过 [Gitee Issues](https://gitee.com/yunhanhai/yunswitch/issues) 或 [GitHub Issues](https://github.com/yunhanhai/yunswitch/issues) 提交问题与建议。代码贡献见[贡献指南](CONTRIBUTING.md)，安全问题按[安全政策](SECURITY.md)联系维护者。
 
-请求诊断与共享渠道已实现，并分别完成源码和 build-only 包验收。当前先验证并发布带有可识别构建来源的 `.9`，随后按独立场景完善表单草稿保护、真实供应商及长会话验证。范围与完成标准见[开发路线](docs/DEVELOPMENT-ROADMAP.md)。
+请求诊断与共享渠道已实现，并分别完成源码和 build-only 包验收。带有可识别构建来源的 `.9` 已发布，下一阶段按独立场景完善表单草稿保护、真实供应商及长会话验证。范围与完成标准见[开发路线](docs/DEVELOPMENT-ROADMAP.md)。
 
 ## 来源与许可证
 

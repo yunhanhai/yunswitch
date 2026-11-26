@@ -6,7 +6,7 @@ AI コーディングツールの設定とローカルルーティングを、�
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2-orange.svg)](https://tauri.app/)
-[![Windows x64 prerelease](https://img.shields.io/badge/Windows_x64-Prerelease-blue.svg)](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.8)
+[![Windows x64 prerelease](https://img.shields.io/badge/Windows_x64-Prerelease-blue.svg)](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.9)
 
 [English](README.md) | [中文](README_ZH.md) | 日本語 | [Deutsch](README_DE.md)
 
@@ -28,17 +28,15 @@ YunSwitch は Claude Code、Codex、Gemini CLI などのプロバイダー設定
 
 ## ダウンロードとクイックスタート
 
-**次のバージョンを準備中：**[`3.20.1-yunswitch.9`](docs/releases/3.20.1-yunswitch.9.md) では Claude Code / Codex 共通チャネル、既存設定の関連付け、機密情報を除いたリクエスト診断、ビルド元情報を新しい Windows パッケージに含めます。新パッケージと `.8` からのアップグレード検証は 206 項目に成功しました。公開準備中のため、以下のダウンロードは引き続き `.8` です。
-
-現在のバージョン：**`3.20.1-yunswitch.8` Windows x64 プレビュー版**。MSI インストーラーとポータブル ZIP を公開しています。
+現在のバージョン：**`3.20.1-yunswitch.9` Windows x64 プレビュー版**。MSI インストーラーとポータブル ZIP を公開しています。
 
 | プラットフォーム | 入手方法と検証状況                                                                                                                                                                                                                       |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Windows x64      | [GitHub](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.8) · [Gitee](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.8)。インストール、`.7` からのアップグレード、アンインストールを検証済み |
-| macOS / Linux    | [ソース CI](https://github.com/yunhanhai/yunswitch/actions/runs/43592579771) は成功。独立パッケージとインストール検証は未提供                                                                                                            |
+| Windows x64      | [GitHub](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.9) · [Gitee](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.9)。インストール、`.8` からのアップグレード、アンインストールを検証済み |
+| macOS / Linux    | [ソース CI](https://github.com/yunhanhai/yunswitch/actions/runs/45871888586) は成功。独立パッケージとインストール検証は未提供                                                                                                            |
 | ARM64            | 独立パッケージとインストール検証は未提供                                                                                                                                                                                                 |
 
-`.8` はレート制限後の回復を順番に処理し、延長された共有待機期限と待機上限を守ります。**ローカルのプロキシ回帰テスト 1569 件**と **[Windows 実行検証 88 件](https://github.com/yunhanhai/yunswitch/actions/runs/43592678793)**に成功しました。詳細は[リリース記録](docs/releases/3.20.1-yunswitch.8.md)を参照してください。
+`.9` は Claude Code / Codex の共通チャネル、既存設定の関連付け、機密情報を除いたリクエスト診断、リクエスト予算、完了統計とビルド元情報を提供します。**フロントエンド 1153 件**と **[Windows 実行検証 206 件](https://github.com/yunhanhai/yunswitch/actions/runs/45871920781)**に成功し、`.8` からのアップグレードも確認しました。[リリース記録](docs/releases/3.20.1-yunswitch.9.md)を参照してください。
 
 Windows パッケージは未署名で、自動更新は無効です。更新には上記の公開パッケージを使用し、既存設定を使う前に[移行ガイド](docs/MIGRATION-YUNSWITCH.md)を確認してください。
 
@@ -87,7 +85,7 @@ Windows x64 `.8` のリリース検証で確認した Codex 暗号化履歴互�
 | 設定変換                       | [Claude → Codex](docs/claude-to-codex-conversion.md)                                                                                                                                                 |
 | 他のプロバイダーを利用         | [Codex と Kimi](docs/guides/codex-kimi-routing-guide-en.md) · [Codex と Claude](docs/guides/codex-claude-routing-guide-en.md) · [Claude Code と Codex](docs/guides/claude-codex-routing-guide-en.md) |
 | Codex Desktop のモデル表示     | [カスタムモデル](docs/guides/codex-desktop-custom-model-visibility-en.md)                                                                                                                            |
-| 移行と更新                     | [移行ガイド](docs/MIGRATION-YUNSWITCH.md) · [リリース記録](docs/releases/3.20.1-yunswitch.8.md)                                                                                                      |
+| 移行と更新                     | [移行ガイド](docs/MIGRATION-YUNSWITCH.md) · [リリース記録](docs/releases/3.20.1-yunswitch.9.md)                                                                                                      |
 | 計画と出典                     | [開発計画](docs/DEVELOPMENT-ROADMAP.md) · [プロジェクト情報](docs/PROJECT.md) · [出典台帳](docs/PROVENANCE.md)                                                                                       |
 
 詳細な技術資料の一部は中文または英語です。[変更履歴](CHANGELOG.md)に過去のバージョンと検証記録を保持しています。旧資料の上流インストール情報は履歴として参照し、本プロジェクトの更新にはここで公開したパッケージを使用してください。
@@ -109,7 +107,7 @@ GitHub からも `https://github.com/yunhanhai/yunswitch.git` をクローンで
 
 現在は一人で保守しています。[Gitee Issues](https://gitee.com/yunhanhai/yunswitch/issues) または [GitHub Issues](https://github.com/yunhanhai/yunswitch/issues)で問題や提案を受け付けます。コードの貢献は[貢献ガイド](CONTRIBUTING.md)、セキュリティ報告は[セキュリティ方針](SECURITY.md)を参照してください。
 
-リクエスト診断と共通チャネルは実装済みで、各段階のソース検査と公開前パッケージ検証を完了しています。現在はビルド元を識別できる `.9` の検証と公開を進め、その後はフォームの編集中データ保護、実プロバイダーと長いセッションを個別に検証します。範囲と完了条件は[開発計画](docs/DEVELOPMENT-ROADMAP.md)を参照してください。
+リクエスト診断と共通チャネルは実装済みで、各段階のソース検査と公開前パッケージ検証を完了しています。ビルド元を識別できる `.9` は公開済みです。次はフォームの編集中データ保護、実プロバイダーと長いセッションを個別に検証します。範囲と完了条件は[開発計画](docs/DEVELOPMENT-ROADMAP.md)を参照してください。
 
 ## 出典とライセンス
 
