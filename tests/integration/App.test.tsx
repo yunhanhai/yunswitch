@@ -361,11 +361,10 @@ describe("App integration with MSW", () => {
       ),
     );
     fireEvent.click(screen.getByText("switch-codex"));
-    await waitFor(() =>
-      expect(screen.getByTestId("provider-list")).not.toHaveTextContent(
-        "claude-old",
-      ),
+    expect(screen.getByTestId("provider-list")).not.toHaveTextContent(
+      "claude-old",
     );
+    expect(screen.getByTestId("current-provider")).toHaveTextContent(/^$/);
     release();
     await waitFor(() =>
       expect(screen.getByTestId("provider-list")).toHaveTextContent(
