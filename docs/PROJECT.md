@@ -38,7 +38,9 @@
 
 当前公开版本为 `3.20.1-yunswitch.8`，新增已限流请求的恢复协调、动态共享期限及等待预算，见[恢复说明](CODEX-STREAM-RECOVERY.md)与[`.8` 发布记录](releases/3.20.1-yunswitch.8.md)。
 
-当前源码版本为 `3.20.1-yunswitch.8`，package.json、Cargo.toml、Cargo.lock 与 Tauri 配置保持一致。Windows x64 安装版与便携 ZIP 已在 [GitHub](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.8) 和 [Gitee](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.8) 公开；安装、`.7` 升级、并发恢复及共享期限检查通过验收。之前的[`.7` 版本](releases/3.20.1-yunswitch.7.md)保留原附件和验收记录。
+当前开发准备版本为 `3.20.1-yunswitch.9`，package.json、Cargo.toml、Cargo.lock 与 Tauri 配置同步，Windows MSI 为 `3.20.1.9`。本版汇总下面已集成的功能，并在关于页显示和复制版本、源码提交与目标平台；新版本源码 CI 与真实新包、`.8` 升级 206 项验收已通过，尚未公开，进度见[`.9` 发布记录](releases/3.20.1-yunswitch.9.md)。
+
+当前 Windows x64 公开安装版与便携 ZIP 仍是 [GitHub](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.8) 和 [Gitee](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.8) 的 `.8`；安装、`.7` 升级、并发恢复及共享期限检查通过验收。之前的[`.7` 版本](releases/3.20.1-yunswitch.7.md)保留原附件和验收记录。
 
 `.8` 发布后的诊断源码已通过 [CI 与 Windows build-only 安装验收](REQUEST-DIAGNOSTICS-ACCEPTANCE.md)，可在桌面路由设置中查看请求状态。公开 `.8` 附件和版本标识未变；新诊断源码尚未作为新版本发布。
 
@@ -62,7 +64,7 @@
 
 开发命令通过 `tauri.dev.conf.json` 覆盖身份，Cargo debug profile 使用隔离布局；发布构建使用正式布局。运行时按布局设置窗口标题。显式应用设置可以覆盖 CLI 目录；开发布局默认优先于 Hermes、OpenCode 和 Pi 的环境变量目录。测试沙盒保留旧夹具布局，仅用于兼容现有测试。
 
-Windows MSI 沿用固定独立 UpgradeCode，当前安装版本为 `3.20.1.8`；应用显示与 Git 标签使用完整预发布版本。`.1`→`.2` 至 `.7`→`.8` 各次相邻版本升级均有独立验收记录，包含合成数据与设置保留以及对应版本的代理运行检查。内部可执行文件 `cc-switch`、数据库文件 `cc-switch.db` 和兼容字段暂时保留。配置迁移见[迁移指南](MIGRATION-YUNSWITCH.md)。
+Windows MSI 沿用固定独立 UpgradeCode，当前公开安装版本为 `3.20.1.8`，本轮准备 `3.20.1.9`；应用显示与 Git 标签使用完整预发布版本。`.1`→`.2` 至 `.7`→`.8` 各次相邻版本升级均有独立验收记录，包含合成数据与设置保留以及对应版本的代理运行检查。内部可执行文件 `cc-switch`、数据库文件 `cc-switch.db` 和兼容字段暂时保留。配置迁移见[迁移指南](MIGRATION-YUNSWITCH.md)。
 
 自动更新关闭、更新地址为空，上游签名公钥已移除。更新按钮打开本项目的 Releases 页面；后续配置本项目签名后再启用自动更新。R2 镜像默认停用，仅通过本项目显式配置启用。
 

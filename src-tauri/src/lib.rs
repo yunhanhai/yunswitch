@@ -1374,6 +1374,7 @@ pub fn run() {
             commands::get_skills_migration_result,
             commands::get_app_config_path,
             commands::get_runtime_directory_identity,
+            commands::get_build_info,
             commands::is_app_updater_configured,
             commands::open_app_config_folder,
             commands::get_claude_common_config_snippet,

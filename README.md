@@ -28,6 +28,8 @@ YunSwitch manages provider configurations for Claude Code, Codex, Gemini CLI and
 
 ## Download and quick start
 
+**Next release in preparation:** [`3.20.1-yunswitch.9`](docs/releases/3.20.1-yunswitch.9.md) will bring shared Claude Code / Codex channels, linking existing configurations, redacted request diagnostics and build-source information to a new Windows package. Its new-package and `.8` upgrade checks are still pending; the public downloads below remain `.8`.
+
 Current release: **`3.20.1-yunswitch.8` Windows x64 prerelease**, available as an MSI installer and portable ZIP.
 
 | Platform      | Downloads and verification                                                                                                                                                                                                                   |
@@ -126,7 +128,7 @@ You can also clone `https://github.com/yunhanhai/yunswitch.git`. When using Core
 
 The project currently has one maintainer. Use [Gitee Issues](https://gitee.com/yunhanhai/yunswitch/issues) or [GitHub Issues](https://github.com/yunhanhai/yunswitch/issues) for questions and suggestions. Read [CONTRIBUTING.md](CONTRIBUTING.md) for code contributions and [SECURITY.md](SECURITY.md) for security reports.
 
-Next priorities are redacted request diagnostics and understandable waiting states, followed by real-provider and long-session verification, protocol scenarios and platform releases. The [roadmap](docs/DEVELOPMENT-ROADMAP.md) defines their order and acceptance criteria.
+Request diagnostics and shared channels are implemented and have passed their separate source and build-only checks. The current task is to validate and publish `.9` with identifiable build sources, followed by focused form-draft protection and real-provider / long-session verification. The [roadmap](docs/DEVELOPMENT-ROADMAP.md) records their scope and acceptance criteria.
 
 ## Attribution and license
 

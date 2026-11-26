@@ -872,6 +872,17 @@
     "checking": "检查中...",
     "upToDate": "已是最新",
     "aboutHint": "查看版本信息与更新状态。",
+    "buildInfo": {
+      "title": "构建信息",
+      "source": "源码提交",
+      "sourceUnknown": "未记录（本地构建）",
+      "target": "目标平台",
+      "copy": "复制构建信息",
+      "copyHint": "仅复制版本、完整源码提交（未记录时为 null）和目标平台。",
+      "copied": "已复制构建信息。",
+      "copyFailed": "无法复制构建信息。",
+      "loadFailed": "无法读取构建信息，请重新打开关于页重试。"
+    },
     "portableMode": "当前为便携版，更新需手动下载。",
     "updateAvailable": "检测到新版本：{{version}}",
     "updateBadge": "有更新可用",

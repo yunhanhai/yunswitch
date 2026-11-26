@@ -3,6 +3,24 @@
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::UpdaterExt;
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BuildInfo {
+    version: &'static str,
+    source_commit: Option<&'static str>,
+    target: &'static str,
+}
+
+/// Static build metadata only; no runtime configuration or machine information.
+#[tauri::command]
+pub fn get_build_info() -> BuildInfo {
+    BuildInfo {
+        version: env!("CARGO_PKG_VERSION"),
+        source_commit: option_env!("YUNSWITCH_BUILD_COMMIT"),
+        target: env!("YUNSWITCH_BUILD_TARGET"),
+    }
+}
+
 /// 应用更新下载进度（通过 `update-download-progress` 事件发给前端）。
 #[derive(Clone, serde::Serialize)]
 struct UpdateDownloadProgress {
@@ -385,6 +403,22 @@ mod tests {
         WebDavSyncSettings,
     };
 
+    #[test]
+    fn build_info_exposes_only_static_release_metadata() {
+        let value = serde_json::to_value(super::get_build_info()).unwrap();
+        let fields = value.as_object().unwrap();
+        assert_eq!(fields.len(), 3);
+        assert_eq!(value["version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(value["target"], env!("YUNSWITCH_BUILD_TARGET"));
+        if let Some(commit) = value["sourceCommit"].as_str() {
+            assert_eq!(commit.len(), 40);
+            assert!(commit
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
+        } else {
+            assert!(value["sourceCommit"].is_null());
+        }
+    }
     #[test]
     fn independent_updater_requires_enabled_key_and_endpoints() {
         use serde_json::json;
