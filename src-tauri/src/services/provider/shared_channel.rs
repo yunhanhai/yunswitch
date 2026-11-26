@@ -215,11 +215,17 @@ fn merge_child(
         let provider_id = codex_provider_id(&document).to_string();
         // The existing Codex form edits named TOML sections. Canonicalize only
         // the connection tables while retaining every other advanced field.
-        if let Some(table) = document["model_providers"].as_inline_table().cloned() {
+        if let Some(table) = document
+            .get("model_providers")
+            .and_then(toml_edit::Item::as_inline_table)
+            .cloned()
+        {
             document["model_providers"] = toml_edit::Item::Table(table.into_table());
         }
-        if let Some(table) = document["model_providers"][&provider_id]
-            .as_inline_table()
+        if let Some(table) = document
+            .get("model_providers")
+            .and_then(|providers| providers.get(&provider_id))
+            .and_then(toml_edit::Item::as_inline_table)
             .cloned()
         {
             document["model_providers"][&provider_id] = toml_edit::Item::Table(table.into_table());
