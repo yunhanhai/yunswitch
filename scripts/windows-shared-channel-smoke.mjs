@@ -116,16 +116,32 @@ export async function exerciseSharedChannels(cdp, { check, until, label }) {
     );
   }
   async function click(selector) {
-    assert.equal(
-      await cdp.evaluate(`(() => {
+    const point = await until(
+      () =>
+        cdp.evaluate(`(() => {
         const button = document.querySelector(${JSON.stringify(selector)});
         if (!button || button.disabled) return false;
-        button.click();
-        return true;
+        button.scrollIntoView({block:'center'});
+        const rect = button.getBoundingClientRect();
+        if (!rect.width || !rect.height) return false;
+        return {x:rect.x + rect.width/2,y:rect.y + rect.height/2};
       })()`),
-      true,
-      `click ${selector}`,
+      `visible enabled control ${selector}`,
     );
+    // Radix tabs activate on pointer down; HTMLElement.click() does not produce
+    // the input sequence of a user clicking the packaged WebView.
+    await cdp.send("Input.dispatchMouseEvent", {
+      type: "mousePressed",
+      ...point,
+      button: "left",
+      clickCount: 1,
+    });
+    await cdp.send("Input.dispatchMouseEvent", {
+      type: "mouseReleased",
+      ...point,
+      button: "left",
+      clickCount: 1,
+    });
   }
   async function showProviderList(app = "claude") {
     await cdp.evaluate("location.reload()");
