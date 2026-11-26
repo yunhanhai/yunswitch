@@ -551,7 +551,7 @@ export async function exerciseSharedChannels(cdp, { check, until, label }) {
     } catch (error) {
       const stored = await child("codex");
       const probe = await cdp.evaluate(
-        `({calls:window.__sharedEditProbe.calls,completed:window.__sharedEditProbe.completed,submits:window.__sharedEditProbe.submits,invalid:window.__sharedEditProbe.invalid,response:window.__sharedEditProbe.response,model:document.querySelector('#codexDefaultModel')?.value,note:document.querySelector('input[name=notes]')?.value,errors:[...document.querySelectorAll('[role=alert],[data-sonner-toast]')].map(e=>e.textContent),text:document.body.innerText.slice(-3000)})`,
+        `({calls:window.__sharedEditProbe.calls,completed:window.__sharedEditProbe.completed,submits:window.__sharedEditProbe.submits,invalid:window.__sharedEditProbe.invalid,response:window.__sharedEditProbe.response,model:document.querySelector('#codexDefaultModel')?.value,note:document.querySelector('input[name=notes]')?.value,missingEndpoint:document.body.innerText.includes('API endpoint is required'),missingKey:document.body.innerText.includes('API Key is required'),errors:[...document.querySelectorAll('[role=alert],[data-sonner-toast]')].map(e=>e.textContent)})`,
       );
       await cdp.screenshot(
         `${label.replaceAll(" ", "-")}-shared-channel-editor-failure.png`,
@@ -806,7 +806,6 @@ export async function exerciseSharedChannels(cdp, { check, until, label }) {
 
     for (const app of apps)
       await cdp.invoke("switch_provider", { app, id: previous[app].provider });
-    const beforeRouteDelete = await snapshot();
     group = await cdp.invoke("create_routing_group", {
       appType: "claude",
       name: "CI shared channel references",
@@ -815,6 +814,9 @@ export async function exerciseSharedChannels(cdp, { check, until, label }) {
       groupId: group.id,
       providerId: childId("claude"),
     });
+    // Group membership updates the provider's failover marker; capture the
+    // baseline after that deliberate mutation, before the rejected deletion.
+    const beforeRouteDelete = await snapshot();
     await assert.rejects(
       cdp.invoke("delete_universal_provider", { id: channel.id }),
     );
