@@ -57,6 +57,15 @@ HTTP 解码接线、预算和取消管理由本项目实现，位于 `src-tauri/
 
 ## 后续引入记录
 
+2026-11-23 的[流安全改进](STREAM-SAFETY.md)参考了以下固定快照的安全错误及流收尾设计，按 YunSwitch 的 Rust 转换器、用量解析器与诊断机制自行实现，没有复制代码或资源、引入依赖：
+
+- [AI SDK](https://github.com/vercel/ai/tree/fac1d6a5882903594278edef0d58859d25c80ae8)，Apache-2.0，参考 `packages/ai/src/ui-message-stream/create-ui-message-stream.ts` 的安全错误默认值与 `ui-message-stream-outcome.ts` 的结果建模。
+- [LiteLLM](https://github.com/BerriAI/litellm/tree/fdf3bab02f77b5bb28e6b4f0a062f4557d71d8ef)，该路径为 MIT，参考 `litellm/proxy/common_utils/responses_stream_errors.py` 的 Responses 错误表达；不采用其企业目录或授权条款不同的实现。
+- [Bifrost](https://github.com/maximhq/bifrost/tree/e68c7358f8b0cbc0435e74120652f5ced603b40a)，Apache-2.0，参考 `core/streamfallback_test.go` 的取消与收尾验证。
+- [Magpie](https://github.com/yetone/magpie/tree/6de54b464f59253ccffe913f5909ff47e1a3e8db)，MIT，参考 `internal/gateway/stream_error_shape_test.go` 的错误形状测试。
+
+本仓涉及 `proxy/providers/stream_error.rs`、各流转换器、`proxy/sse.rs`、`response_processor.rs` 与 `usage/stream_summary.rs`。本轮只实现安全传输错误和有界统计观察；协议成功终态统一另行完成。
+
 复制、移植或改编第三方实现与资源时，在对应 PR 中填充以下记录，合并后纳入本台账。仅借鉴设计也应说明参考依据与自行实现范围。
 
 ```text

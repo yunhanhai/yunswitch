@@ -4,6 +4,7 @@
 //! SSE events for Claude-compatible clients.
 
 use super::gemini_shadow::{GeminiShadowStore, GeminiToolCallMeta};
+use super::stream_error::StreamTransportError;
 use super::transform_gemini::{
     build_anthropic_usage, is_synthesized_tool_call_id, rectify_tool_call_parts,
     synthesize_tool_call_id, AnthropicToolSchemaHints,
@@ -403,7 +404,7 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
                     }
                 }
                 Err(error) => {
-                    yield Err(std::io::Error::other(error.to_string()));
+                    yield Err(StreamTransportError::from_error(&error).into_io_error());
                     return;
                 }
             }

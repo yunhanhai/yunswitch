@@ -1692,10 +1692,10 @@ impl Database {
         let detail_sql = format!(
             "SELECT l.request_id, l.provider_id, {detail_pname} as provider_name, l.app_type, l.session_id, l.model,
                     l.request_model, l.cost_multiplier,
-                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-                    input_cost_usd, output_cost_usd, cache_read_cost_usd, cache_creation_cost_usd, total_cost_usd,
-                    is_streaming, latency_ms, first_token_ms, duration_ms,
-                    status_code, error_message, created_at, l.data_source, l.pricing_model,
+                    l.input_tokens, l.output_tokens, l.cache_read_tokens, l.cache_creation_tokens,
+                    l.input_cost_usd, l.output_cost_usd, l.cache_read_cost_usd, l.cache_creation_cost_usd, l.total_cost_usd,
+                    l.is_streaming, l.latency_ms, l.first_token_ms, l.duration_ms,
+                    l.status_code, l.error_message, l.created_at, l.data_source, l.pricing_model,
                     l.input_token_semantics
              FROM proxy_request_logs l
              LEFT JOIN providers p ON l.provider_id = p.id AND l.app_type = p.app_type
@@ -2519,6 +2519,57 @@ mod tests {
             )",
             [],
         )?;
+        Ok(())
+    }
+
+    #[test]
+    fn request_detail_joins_provider_without_ambiguous_log_columns() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        {
+            let conn = lock_conn!(db.conn);
+            conn.execute(
+                "INSERT INTO providers (id, app_type, name, settings_config, created_at)
+                 VALUES ('synthetic-provider', 'claude', 'Synthetic provider', '{}', 10)",
+                [],
+            )?;
+            insert_usage_log(
+                &conn,
+                "session:synthetic-stream",
+                "claude",
+                "synthetic-provider",
+                "synthetic-model",
+                "proxy",
+                20,
+                17,
+                2048,
+                5,
+                3,
+                200,
+                "0",
+            )?;
+        }
+        let detail = db.get_request_detail("session:synthetic-stream")?.unwrap();
+        assert_eq!(detail.provider_name.as_deref(), Some("Synthetic provider"));
+        assert_eq!(detail.created_at, 20);
+        assert_eq!((detail.input_tokens, detail.output_tokens), (17, 2048));
+        assert_eq!(
+            (detail.cache_read_tokens, detail.cache_creation_tokens),
+            (5, 3)
+        );
+        assert!(db
+            .get_request_detail("missing-synthetic-request")?
+            .is_none());
+        {
+            let conn = lock_conn!(db.conn);
+            conn.execute("DELETE FROM providers WHERE id = 'synthetic-provider'", [])?;
+        }
+        assert_eq!(
+            db.get_request_detail("session:synthetic-stream")?
+                .unwrap()
+                .provider_name
+                .as_deref(),
+            Some("synthetic-provider")
+        );
         Ok(())
     }
 
