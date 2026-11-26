@@ -1,19 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Loader2, Plus } from "lucide-react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FullScreenPanel } from "@/components/common/FullScreenPanel";
-import type { Provider, CustomEndpoint, UniversalProvider } from "@/types";
+import type { Provider, CustomEndpoint } from "@/types";
 import type { AppId } from "@/lib/api";
-import { universalProvidersApi } from "@/lib/api";
 import {
   ProviderForm,
   type ProviderFormValues,
 } from "@/components/providers/forms/ProviderForm";
 import { AuthSettingsPanel } from "@/components/providers/AuthSettingsPanel";
-import { UniversalProviderFormModal } from "@/components/universal/UniversalProviderFormModal";
 import { UniversalProviderPanel } from "@/components/universal";
 import { providerPresets } from "@/config/claudeProviderPresets";
 import { codexProviderPresets } from "@/config/codexProviderPresets";
@@ -23,7 +20,6 @@ import { extractCodexBaseUrl } from "@/utils/providerConfigUtils";
 import { extractGrokBuildBaseUrl } from "@/utils/grokBuildConfig";
 import { GROKBUILD_OFFICIAL_PROVIDER_ID } from "@/utils/providerCapabilities";
 import type { OpenClawSuggestedDefaults } from "@/config/openclawProviderPresets";
-import type { UniversalProviderPreset } from "@/config/universalProviderPresets";
 import type { ManagedAuthProvider } from "@/lib/api";
 
 interface AddProviderDialogProps {
@@ -58,10 +54,8 @@ export function AddProviderDialog({
   const [activeTab, setActiveTab] = useState<"app-specific" | "universal">(
     "app-specific",
   );
-  const [universalFormOpen, setUniversalFormOpen] = useState(false);
-  const [selectedUniversalPreset, setSelectedUniversalPreset] =
-    useState<UniversalProviderPreset | null>(null);
   const [isFormSubmitting, setIsFormSubmitting] = useState(false);
+  const [sharedFormOpen, setSharedFormOpen] = useState(false);
   const [authSettingsTarget, setAuthSettingsTarget] =
     useState<ManagedAuthProvider | null>(null);
 
@@ -75,12 +69,14 @@ export function AddProviderDialog({
   }, [onOpenChange]);
 
   const handlePanelClose = useCallback(() => {
+    // The nested shared-channel form handles its own back/escape action.
+    if (sharedFormOpen) return;
     if (authSettingsTarget) {
       setAuthSettingsTarget(null);
       return;
     }
     closeDialog();
-  }, [authSettingsTarget, closeDialog]);
+  }, [authSettingsTarget, closeDialog, sharedFormOpen]);
   const formReadyToken = useMemo(
     () => Symbol("provider-form-ready"),
     [appId, open],
@@ -103,54 +99,6 @@ export function AddProviderDialog({
     },
     [formReadyToken],
   );
-
-  const handleUniversalProviderSave = useCallback(
-    async (provider: UniversalProvider) => {
-      try {
-        await universalProvidersApi.upsert(provider);
-      } catch (error) {
-        console.error(
-          "[AddProviderDialog] Failed to save universal provider",
-          error,
-        );
-        toast.error(
-          t("universalProvider.addFailed", {
-            defaultValue: "统一供应商添加失败",
-          }),
-        );
-        return;
-      }
-
-      try {
-        await universalProvidersApi.sync(provider.id);
-        toast.success(
-          t("universalProvider.addedAndSynced", {
-            defaultValue: "统一供应商已添加并同步",
-          }),
-        );
-      } catch (error) {
-        console.error(
-          "[AddProviderDialog] Provider saved but sync failed",
-          error,
-        );
-        toast.warning(
-          t("universalProvider.addedButSyncFailed", {
-            defaultValue: "统一供应商已添加，但同步失败",
-          }),
-        );
-      }
-
-      setUniversalFormOpen(false);
-      setSelectedUniversalPreset(null);
-      onOpenChange(false);
-    },
-    [t, onOpenChange],
-  );
-
-  const handleUniversalFormClose = useCallback(() => {
-    setUniversalFormOpen(false);
-    setSelectedUniversalPreset(null);
-  }, []);
 
   const handleSubmit = useCallback(
     async (values: ProviderFormValues) => {
@@ -391,13 +339,6 @@ export function AddProviderDialog({
         >
           {t("common.cancel")}
         </Button>
-        <Button
-          onClick={() => setUniversalFormOpen(true)}
-          className="bg-primary text-primary-foreground hover:bg-primary/90"
-        >
-          <Plus className="h-4 w-4 mr-2" />
-          {t("universalProvider.add")}
-        </Button>
       </>
     );
 
@@ -418,12 +359,24 @@ export function AddProviderDialog({
             <TabsTrigger value="app-specific">
               {t(`apps.${appId}`)} {t("provider.tabProvider")}
             </TabsTrigger>
-            <TabsTrigger value="universal">
+            <TabsTrigger value="universal" data-testid="shared-channel-tab">
               {t("provider.tabUniversal")}
             </TabsTrigger>
           </TabsList>
 
           <TabsContent value="app-specific" className="mt-0">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 p-3">
+              <p className="text-sm text-muted-foreground">
+                {t("universalProvider.addPrompt")}
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setActiveTab("universal")}
+              >
+                {t("universalProvider.title")}
+              </Button>
+            </div>
             <ProviderForm
               appId={appId}
               submitLabel={t("common.add")}
@@ -437,7 +390,14 @@ export function AddProviderDialog({
           </TabsContent>
 
           <TabsContent value="universal" className="mt-0">
-            <UniversalProviderPanel />
+            <UniversalProviderPanel
+              onFormOpenChange={setSharedFormOpen}
+              initialApp={
+                appId === "claude" || appId === "codex" || appId === "gemini"
+                  ? appId
+                  : undefined
+              }
+            />
           </TabsContent>
         </Tabs>
       ) : (
@@ -451,15 +411,6 @@ export function AddProviderDialog({
           onSubmittingChange={setIsFormSubmitting}
           onSubmitReadyChange={handleSubmitReadyChange}
           showButtons={false}
-        />
-      )}
-
-      {showUniversalTab && (
-        <UniversalProviderFormModal
-          isOpen={universalFormOpen}
-          onClose={handleUniversalFormClose}
-          onSave={handleUniversalProviderSave}
-          initialPreset={selectedUniversalPreset}
         />
       )}
 

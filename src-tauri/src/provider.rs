@@ -466,6 +466,9 @@ impl ProviderRequestBudget {
 /// 供应商元数据
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProviderMeta {
+    /// Shared channel owning this application's credentials and connection.
+    #[serde(rename = "sharedChannelId", skip_serializing_if = "Option::is_none")]
+    pub shared_channel_id: Option<String>,
     /// 自定义端点列表（按 URL 去重存储）
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub custom_endpoints: HashMap<String, crate::settings::CustomEndpoint>,
@@ -720,6 +723,26 @@ pub struct UniversalProviderModels {
     pub gemini: Option<GeminiModelConfig>,
 }
 
+/// Per-application overrides; absent values preserve the legacy defaults.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedChannelConnection {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_format: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SharedChannelConnections {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claude: Option<SharedChannelConnection>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub codex: Option<SharedChannelConnection>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gemini: Option<SharedChannelConnection>,
+}
+
 /// 统一供应商（跨应用共享配置）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UniversalProvider {
@@ -741,6 +764,8 @@ pub struct UniversalProvider {
     /// 各应用的模型配置
     #[serde(default)]
     pub models: UniversalProviderModels,
+    #[serde(default)]
+    pub connections: SharedChannelConnections,
     /// 网站链接
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "websiteUrl")]
@@ -785,6 +810,7 @@ impl UniversalProvider {
             base_url,
             api_key,
             models: UniversalProviderModels::default(),
+            connections: SharedChannelConnections::default(),
             website_url: None,
             notes: None,
             icon: None,
@@ -793,6 +819,49 @@ impl UniversalProvider {
             created_at: Some(chrono::Utc::now().timestamp_millis()),
             sort_index: None,
         }
+    }
+
+    fn connection_url<'a>(&'a self, connection: Option<&'a SharedChannelConnection>) -> &'a str {
+        connection
+            .and_then(|connection| connection.base_url.as_deref())
+            .map(str::trim)
+            .filter(|url| !url.is_empty())
+            .unwrap_or(&self.base_url)
+    }
+
+    pub(crate) fn supports_connection_format(default_format: &str, format: &str) -> bool {
+        match default_format {
+            "anthropic" => matches!(
+                format,
+                "anthropic" | "openai_chat" | "openai_responses" | "gemini_native"
+            ),
+            "openai_responses" => {
+                matches!(format, "openai_responses" | "openai_chat" | "anthropic")
+            }
+            "gemini_native" => format == "gemini_native",
+            _ => false,
+        }
+    }
+
+    fn child_meta(
+        &self,
+        connection: Option<&SharedChannelConnection>,
+        default_format: &str,
+    ) -> Option<ProviderMeta> {
+        let mut meta = self.meta.clone().unwrap_or_default();
+        meta.shared_channel_id = Some(self.id.clone());
+        meta.api_format = Some(
+            connection
+                .and_then(|connection| connection.api_format.clone())
+                .or_else(|| {
+                    self.meta
+                        .as_ref()
+                        .and_then(|meta| meta.api_format.clone())
+                        .filter(|format| Self::supports_connection_format(default_format, format))
+                })
+                .unwrap_or_else(|| default_format.to_string()),
+        );
+        Some(meta)
     }
 
     /// 生成 Claude 供应商配置
@@ -817,7 +886,7 @@ impl UniversalProvider {
 
         let settings_config = serde_json::json!({
             "env": {
-                "ANTHROPIC_BASE_URL": self.base_url,
+                "ANTHROPIC_BASE_URL": self.connection_url(self.connections.claude.as_ref()),
                 "ANTHROPIC_AUTH_TOKEN": self.api_key,
                 "ANTHROPIC_MODEL": model,
                 "ANTHROPIC_DEFAULT_HAIKU_MODEL": haiku,
@@ -835,7 +904,7 @@ impl UniversalProvider {
             created_at: self.created_at,
             sort_index: self.sort_index,
             notes: self.notes.clone(),
-            meta: self.meta.clone(),
+            meta: self.child_meta(self.connections.claude.as_ref(), "anthropic"),
             icon: self.icon.clone(),
             icon_color: self.icon_color.clone(),
             in_failover_queue: false,
@@ -857,32 +926,31 @@ impl UniversalProvider {
             .unwrap_or_else(|| "high".to_string());
 
         // Codex/OpenAI 的 base_url 既可能是纯 origin（需要补 /v1），也可能包含自定义前缀（不应强行补版本）
-        let base_trimmed = self.base_url.trim_end_matches('/');
-        let origin_only = match base_trimmed.split_once("://") {
-            Some((_scheme, rest)) => !rest.contains('/'),
-            None => !base_trimmed.contains('/'),
-        };
-        let codex_base_url = if base_trimmed.ends_with("/v1") {
-            base_trimmed.to_string()
-        } else if origin_only {
-            format!("{base_trimmed}/v1")
-        } else {
-            base_trimmed.to_string()
+        let base_trimmed = self
+            .connection_url(self.connections.codex.as_ref())
+            .trim_end_matches('/');
+        let codex_base_url = match url::Url::parse(base_trimmed) {
+            Ok(mut url) if url.path().trim_matches('/').is_empty() => {
+                // Preserve query parameters when adding the default path.
+                url.set_path("/v1");
+                url.to_string()
+            }
+            _ => base_trimmed.to_string(),
         };
 
-        // 生成 Codex 的 config.toml 内容
-        let config_toml = format!(
-            r#"model_provider = "custom"
-model = "{model}"
-model_reasoning_effort = "{reasoning_effort}"
-disable_response_storage = true
-
-[model_providers.custom]
-name = "NewAPI"
-base_url = "{codex_base_url}"
-wire_api = "responses"
-requires_openai_auth = true"#
-        );
+        // toml_edit escapes user-entered names, models and URLs correctly.
+        let mut config = toml_edit::DocumentMut::new();
+        config["model_provider"] = toml_edit::value("custom");
+        config["model"] = toml_edit::value(model);
+        config["model_reasoning_effort"] = toml_edit::value(reasoning_effort);
+        config["disable_response_storage"] = toml_edit::value(true);
+        config["model_providers"]["custom"]["name"] = toml_edit::value(self.name.clone());
+        config["model_providers"]["custom"]["base_url"] = toml_edit::value(codex_base_url);
+        // Codex clients always speak Responses. The upstream protocol belongs
+        // to meta.apiFormat and is converted only by the local proxy.
+        config["model_providers"]["custom"]["wire_api"] = toml_edit::value("responses");
+        config["model_providers"]["custom"]["requires_openai_auth"] = toml_edit::value(true);
+        let config_toml = config.to_string();
 
         let settings_config = serde_json::json!({
             "auth": {
@@ -900,7 +968,7 @@ requires_openai_auth = true"#
             created_at: self.created_at,
             sort_index: self.sort_index,
             notes: self.notes.clone(),
-            meta: self.meta.clone(),
+            meta: self.child_meta(self.connections.codex.as_ref(), "openai_responses"),
             icon: self.icon.clone(),
             icon_color: self.icon_color.clone(),
             in_failover_queue: false,
@@ -920,7 +988,7 @@ requires_openai_auth = true"#
 
         let settings_config = serde_json::json!({
             "env": {
-                "GOOGLE_GEMINI_BASE_URL": self.base_url,
+                "GOOGLE_GEMINI_BASE_URL": self.connection_url(self.connections.gemini.as_ref()),
                 "GEMINI_API_KEY": self.api_key,
                 "GEMINI_MODEL": model,
             }
@@ -935,7 +1003,7 @@ requires_openai_auth = true"#
             created_at: self.created_at,
             sort_index: self.sort_index,
             notes: self.notes.clone(),
-            meta: self.meta.clone(),
+            meta: self.child_meta(self.connections.gemini.as_ref(), "gemini_native"),
             icon: self.icon.clone(),
             icon_color: self.icon_color.clone(),
             in_failover_queue: false,

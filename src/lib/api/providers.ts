@@ -4,6 +4,8 @@ import type {
   Provider,
   UniversalProvider,
   UniversalProvidersMap,
+  SharedChannelApp,
+  SharedChannelSaveResult,
 } from "@/types";
 import type { AppId } from "./types";
 
@@ -217,6 +219,19 @@ export const providersApi = {
 // ============================================================================
 
 export const universalProvidersApi = {
+  async resync(id: string): Promise<SharedChannelSaveResult> {
+    return await invoke("resync_shared_channel", { id });
+  },
+
+  async save(provider: UniversalProvider): Promise<SharedChannelSaveResult> {
+    return await invoke("save_shared_channel", { provider });
+  },
+
+  async preview(
+    provider: UniversalProvider,
+  ): Promise<Partial<Record<SharedChannelApp, Provider>>> {
+    return await invoke("preview_shared_channel", { provider });
+  },
   /**
    * 获取所有统一供应商
    */

@@ -216,6 +216,20 @@ describe("App integration with MSW", () => {
     localStorage.removeItem("cc-switch-last-app");
   });
 
+  it("keeps a protected full-screen draft open when the Settings shortcut is pressed", async () => {
+    renderApp(App);
+    await screen.findByTestId("provider-list");
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    try {
+      fireEvent.keyDown(window, { key: ",", ctrlKey: true });
+      fireEvent.keyDown(window, { key: ",", metaKey: true });
+      expect(screen.getByTestId("provider-list")).toBeInTheDocument();
+    } finally {
+      document.body.style.overflow = previousOverflow;
+    }
+  });
+
   it("covers basic provider flows via real hooks", async () => {
     renderApp(App);
 

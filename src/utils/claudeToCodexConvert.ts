@@ -1,3 +1,4 @@
+import { withoutSharedChannelBinding } from "@/utils/sharedChannel";
 // Claude → Codex 供应商配置转换
 //
 // 一个渠道商的 API Key 在 Claude Code 与 Codex 之间可复用。注意协议语义：
@@ -190,7 +191,7 @@ export const buildConvertedCodexProvider = (
   iconColor: provider.iconColor,
   meta: {
     apiFormat: "anthropic",
-    ...(provider.meta ? provider.meta : {}),
+    ...withoutSharedChannelBinding(provider.meta),
   },
 });
 
@@ -236,7 +237,7 @@ export const buildConvertedCodexProviderWithMode = (
       notes: appendDirectRuntimeNote(provider.notes, provider.name),
       icon: provider.icon,
       iconColor: provider.iconColor,
-      meta: provider.meta ? { ...provider.meta } : undefined,
+      meta: withoutSharedChannelBinding(provider.meta),
     };
   }
   return buildConvertedCodexProvider(provider, conversion);

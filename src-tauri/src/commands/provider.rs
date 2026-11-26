@@ -904,46 +904,96 @@ pub fn get_universal_provider(
 }
 
 #[tauri::command]
-pub fn upsert_universal_provider(
+pub async fn save_shared_channel(
     app: AppHandle,
-    state: State<'_, AppState>,
+    provider: UniversalProvider,
+) -> Result<crate::services::provider::SharedChannelSaveResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app
+            .try_state::<AppState>()
+            .ok_or_else(|| "Application state unavailable".to_string())?;
+        let id = provider.id.clone();
+        let result = ProviderService::save_shared_channel(state.inner(), provider)
+            .map_err(|error| error.to_string())?;
+        emit_universal_provider_synced(&app, "save", &id);
+        Ok(result)
+    })
+    .await
+    .map_err(|_| "Shared channel save task failed".to_string())?
+}
+
+#[tauri::command]
+pub async fn resync_shared_channel(
+    app: AppHandle,
+    id: String,
+) -> Result<crate::services::provider::SharedChannelSaveResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app
+            .try_state::<AppState>()
+            .ok_or_else(|| "Application state unavailable".to_string())?;
+        let result = ProviderService::resync_shared_channel(state.inner(), &id)
+            .map_err(|error| error.to_string())?;
+        emit_universal_provider_synced(&app, "sync", &id);
+        Ok(result)
+    })
+    .await
+    .map_err(|_| "Shared channel synchronization task failed".to_string())?
+}
+
+#[tauri::command]
+pub fn preview_shared_channel(
+    provider: UniversalProvider,
+) -> Result<HashMap<String, Provider>, String> {
+    ProviderService::preview_shared_channel(provider).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn upsert_universal_provider(
+    app: AppHandle,
     provider: UniversalProvider,
 ) -> Result<bool, String> {
-    let id = provider.id.clone();
-    let result =
-        ProviderService::upsert_universal(state.inner(), provider).map_err(|e| e.to_string())?;
-
-    emit_universal_provider_synced(&app, "upsert", &id);
-
-    Ok(result)
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app
+            .try_state::<AppState>()
+            .ok_or_else(|| "Application state unavailable".to_string())?;
+        let id = provider.id.clone();
+        let result = ProviderService::upsert_universal(state.inner(), provider)
+            .map_err(|error| error.to_string());
+        emit_universal_provider_synced(&app, "upsert", &id);
+        result
+    })
+    .await
+    .map_err(|_| "Shared channel save task failed".to_string())?
 }
 
 #[tauri::command]
-pub fn delete_universal_provider(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<bool, String> {
-    let result =
-        ProviderService::delete_universal(state.inner(), &id).map_err(|e| e.to_string())?;
-
-    emit_universal_provider_synced(&app, "delete", &id);
-
-    Ok(result)
+pub async fn delete_universal_provider(app: AppHandle, id: String) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app
+            .try_state::<AppState>()
+            .ok_or_else(|| "Application state unavailable".to_string())?;
+        let result = ProviderService::delete_universal(state.inner(), &id)
+            .map_err(|error| error.to_string())?;
+        emit_universal_provider_synced(&app, "delete", &id);
+        Ok(result)
+    })
+    .await
+    .map_err(|_| "Shared channel delete task failed".to_string())?
 }
 
 #[tauri::command]
-pub fn sync_universal_provider(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<bool, String> {
-    let result =
-        ProviderService::sync_universal_to_apps(state.inner(), &id).map_err(|e| e.to_string())?;
-
-    emit_universal_provider_synced(&app, "sync", &id);
-
-    Ok(result)
+pub async fn sync_universal_provider(app: AppHandle, id: String) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app
+            .try_state::<AppState>()
+            .ok_or_else(|| "Application state unavailable".to_string())?;
+        let result = ProviderService::sync_universal_to_apps(state.inner(), &id)
+            .map_err(|error| error.to_string());
+        emit_universal_provider_synced(&app, "sync", &id);
+        result
+    })
+    .await
+    .map_err(|_| "Shared channel synchronization task failed".to_string())?
 }
 
 #[tauri::command]

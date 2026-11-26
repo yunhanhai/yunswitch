@@ -17,6 +17,7 @@ import {
   type ManagedAuthProvider,
 } from "@/lib/api";
 import { extractCodexExperimentalBearerToken } from "@/utils/providerConfigUtils";
+import { getSharedChannelId } from "@/utils/sharedChannel";
 
 interface EditProviderDialogProps {
   open: boolean;
@@ -26,6 +27,7 @@ interface EditProviderDialogProps {
     provider: Provider;
     originalId?: string;
   }) => Promise<void> | void;
+  onManageSharedChannel?: (provider: Provider) => void;
   appId: AppId;
   isProxyTakeover?: boolean; // 代理接管模式下不读取 live（避免显示被接管后的代理配置）
 }
@@ -93,6 +95,7 @@ export function EditProviderDialog({
   provider,
   onOpenChange,
   onSubmit,
+  onManageSharedChannel,
   appId,
   isProxyTakeover = false,
 }: EditProviderDialogProps) {
@@ -166,7 +169,9 @@ export function EditProviderDialog({
 
       // 代理接管模式：Live 配置已被代理改写，读取 live 会导致编辑界面展示代理地址/占位符等内容
       // 因此直接回退到 SSOT（数据库）配置，避免用户困惑与误保存
-      if (isProxyTakeover) {
+      // Linked providers are edited from their stored projection. Live Codex
+      // settings include derived bearer fields, which the shared channel owns.
+      if (isProxyTakeover || getSharedChannelId(provider, appId)) {
         if (!cancelled) {
           setLiveSettings(null);
           setHasLoadedLive(true);
@@ -352,6 +357,23 @@ export function EditProviderDialog({
         </Button>
       }
     >
+      {getSharedChannelId(provider, appId) && (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-border bg-muted/30 p-3">
+          <p className="min-w-0 flex-1 text-sm text-muted-foreground">
+            {t("universalProvider.linkedChildHint")}
+          </p>
+          {onManageSharedChannel && (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isFormSubmitting}
+              onClick={() => onManageSharedChannel(provider)}
+            >
+              {t("universalProvider.manageShared")}
+            </Button>
+          )}
+        </div>
+      )}
       <ProviderForm
         appId={appId}
         providerId={provider.id}

@@ -35,6 +35,7 @@ import { proxyKeys, useProvidersQuery, useSettingsQuery } from "@/lib/query";
 import {
   piApi,
   providersApi,
+  universalProvidersApi,
   settingsApi,
   type AppId,
   type ProviderSwitchEvent,
@@ -48,6 +49,10 @@ import { hermesApi } from "@/lib/api/hermes";
 import { useProxyStatus } from "@/hooks/useProxyStatus";
 import { useUsageCacheBridge } from "@/hooks/useUsageCacheBridge";
 import { useTauriEvent } from "@/hooks/useTauriEvent";
+import {
+  getSharedChannelId,
+  withoutSharedChannelBinding,
+} from "@/utils/sharedChannel";
 import { useLastValidValue } from "@/hooks/useLastValidValue";
 import { useScanUnmanagedSkills } from "@/hooks/useSkills";
 import {
@@ -257,6 +262,7 @@ function App() {
   }, [sharedFeatureApp, currentView]);
 
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
+  const [sharedChannelEditId, setSharedChannelEditId] = useState<string>();
   const [usageProvider, setUsageProvider] = useState<Provider | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
     provider: Provider;
@@ -684,7 +690,10 @@ function App() {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "," && (event.metaKey || event.ctrlKey)) {
-        if (managementBusyRef.current) {
+        if (
+          managementBusyRef.current ||
+          document.body.style.overflow === "hidden"
+        ) {
           event.preventDefault();
           return;
         }
@@ -819,6 +828,23 @@ function App() {
     return `${baseKey}-${counter}`;
   };
 
+  const handleManageSharedChannel = async (provider: Provider) => {
+    const id = getSharedChannelId(provider, activeApp);
+    if (!id) return;
+    try {
+      const channel = await universalProvidersApi.get(id);
+      if (!channel) {
+        toast.error(t("universalProvider.linkMissing"));
+        return;
+      }
+      setEditingProvider(null);
+      setSharedChannelEditId(id);
+      setCurrentView("universal");
+    } catch {
+      toast.error(t("universalProvider.loadError"));
+    }
+  };
+
   const handleDuplicateProvider = async (provider: Provider) => {
     const newSortIndex =
       provider.sortIndex !== undefined ? provider.sortIndex + 1 : undefined;
@@ -832,7 +858,9 @@ function App() {
       websiteUrl: provider.websiteUrl,
       category: provider.category,
       sortIndex: newSortIndex, // 复制原 sortIndex + 1
-      meta: provider.meta ? deepClone(provider.meta) : undefined,
+      meta: withoutSharedChannelBinding(
+        provider.meta ? deepClone(provider.meta) : undefined,
+      ),
       icon: provider.icon,
       iconColor: provider.iconColor,
     };
@@ -1201,7 +1229,17 @@ function App() {
         case "universal":
           return (
             <div className="px-6 pt-4">
-              <UniversalProviderPanel />
+              <UniversalProviderPanel
+                initialApp={
+                  activeApp === "claude" ||
+                  activeApp === "codex" ||
+                  activeApp === "gemini"
+                    ? activeApp
+                    : undefined
+                }
+                initialEditId={sharedChannelEditId}
+                onEditConsumed={() => setSharedChannelEditId(undefined)}
+              />
             </div>
           );
 
@@ -1254,6 +1292,7 @@ function App() {
                       onEdit={(provider) => {
                         setEditingProvider(provider);
                       }}
+                      onManageSharedChannel={handleManageSharedChannel}
                       onDelete={(provider) =>
                         setConfirmAction({ provider, action: "delete" })
                       }
@@ -1904,6 +1943,7 @@ function App() {
           }
         }}
         onSubmit={handleEditProvider}
+        onManageSharedChannel={handleManageSharedChannel}
         appId={activeApp}
         isProxyTakeover={isCurrentAppTakeoverActive}
       />
