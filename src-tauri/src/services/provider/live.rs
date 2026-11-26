@@ -610,7 +610,7 @@ pub(crate) fn remove_common_config_from_settings(
     }
 }
 
-fn apply_common_config_to_settings(
+pub(super) fn apply_common_config_to_settings(
     app_type: &AppType,
     settings: &Value,
     snippet: &str,

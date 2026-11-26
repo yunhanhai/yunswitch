@@ -157,7 +157,10 @@ export function UniversalProviderFormModal({
     setIsSaving(true);
     setErrorKey(null);
     try {
-      const result = await onSave(provider);
+      const result =
+        failedApps.length > 0
+          ? await universalProvidersApi.resync(provider.id)
+          : await onSave(provider);
       setFailedApps(result.failedApps);
       if (result.failedApps.length === 0) onClose();
     } catch {
@@ -240,7 +243,9 @@ export function UniversalProviderFormModal({
             {t(
               isSaving
                 ? "universalProvider.saving"
-                : "universalProvider.saveAndSync",
+                : failedApps.length > 0
+                  ? "universalProvider.link.resync"
+                  : "universalProvider.saveAndSync",
             )}
           </Button>
         </>
@@ -248,7 +253,7 @@ export function UniversalProviderFormModal({
     >
       {draft && (
         <fieldset
-          disabled={isSaving}
+          disabled={isSaving || failedApps.length > 0}
           className="space-y-6"
           aria-busy={isSaving}
         >
@@ -413,6 +418,11 @@ export function UniversalProviderFormModal({
                       }
                     />
                   </div>
+                  {draft.childIds?.[app] && (
+                    <p className="text-sm text-muted-foreground">
+                      {t("universalProvider.link.disableHint")}
+                    </p>
+                  )}
                   {draft.apps[app] && (
                     <div className="space-y-3">
                       <div className="space-y-1">

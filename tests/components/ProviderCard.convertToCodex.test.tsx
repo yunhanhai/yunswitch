@@ -84,21 +84,24 @@ function renderCard(
 }
 
 describe("ProviderCard Claude → Codex conversion gating", () => {
-  it("opens the shared settings from the associated channel badge", () => {
-    i18n.addResourceBundle("zh", "translation", zh, true, true);
-    const provider = {
-      ...thirdPartyClaudeProvider(),
-      id: "universal-claude-synthetic",
-      meta: { sharedChannelId: "synthetic" },
-    };
-    const manage = vi.fn();
-    const actions = renderCard(provider, manage);
-    expect(actions.onConvertToCodex).toBeUndefined();
-    fireEvent.click(
-      screen.getByRole("button", { name: zh.universalProvider.manageShared }),
-    );
-    expect(manage).toHaveBeenCalledWith(provider);
-  });
+  it.each(["universal-claude-synthetic", "existing-claude-config"])(
+    "opens shared settings for %s",
+    (id) => {
+      i18n.addResourceBundle("zh", "translation", zh, true, true);
+      const provider = {
+        ...thirdPartyClaudeProvider(),
+        id,
+        meta: { sharedChannelId: "synthetic" },
+      };
+      const manage = vi.fn();
+      const actions = renderCard(provider, manage);
+      expect(actions.onConvertToCodex).toBeUndefined();
+      fireEvent.click(
+        screen.getByRole("button", { name: zh.universalProvider.manageShared }),
+      );
+      expect(manage).toHaveBeenCalledWith(provider);
+    },
+  );
 
   it("wires the convert action for a third-party Claude provider", () => {
     const props = renderCard(thirdPartyClaudeProvider());

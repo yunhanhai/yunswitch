@@ -4,6 +4,7 @@
 
 mod endpoints;
 mod gemini_auth;
+mod linking;
 mod live;
 mod pi;
 mod shared_channel;
@@ -105,6 +106,10 @@ pub fn reapply_current_codex_official_live(state: &AppState) -> Result<bool, App
 /// Provider business logic service
 pub struct ProviderService;
 
+pub use linking::{
+    SharedChannelLinkCandidates, SharedChannelLinkPreview, SharedChannelLinkRequest,
+    SharedChannelLinkResult,
+};
 pub use shared_channel::SharedChannelSaveResult;
 
 /// Result of a provider switch operation, including any non-fatal warnings
@@ -4502,14 +4507,33 @@ impl ProviderService {
 
         let is_managed_codex_add = matches!(app_type, AppType::Codex)
             && Self::managed_codex_oauth_account_id(&provider).is_some();
-        let _managed_codex_add_guard = if is_managed_codex_add {
-            Some(futures::executor::block_on(
-                state.proxy_service.lock_switch_for_app(app_type.as_str()),
-            ))
-        } else {
-            None
-        };
+        let _managed_codex_add_guard =
+            if is_managed_codex_add || matches!(app_type, AppType::Claude | AppType::Codex) {
+                Some(futures::executor::block_on(
+                    state.proxy_service.lock_switch_for_app(app_type.as_str()),
+                ))
+            } else {
+                None
+            };
 
+        if matches!(app_type, AppType::Claude | AppType::Codex) {
+            if let Some(existing) = state
+                .db
+                .get_provider_by_id(&provider.id, app_type.as_str())?
+            {
+                if existing
+                    .meta
+                    .as_ref()
+                    .is_some_and(|meta| meta.shared_channel_id.is_some())
+                {
+                    return Err(AppError::localized(
+                        "shared_channel.edit_connection",
+                        "此配置已关联，请通过编辑共享渠道修改。",
+                        "This configuration is linked. Edit its shared channel instead.",
+                    ));
+                }
+            }
+        }
         if is_managed_codex_add {
             let effective_current =
                 crate::settings::get_effective_current_provider(&state.db, &app_type)?;
@@ -4617,7 +4641,7 @@ impl ProviderService {
         // only after this lock is held. Non-managed Codex updates release it
         // before entering the legacy path, whose proxy helpers take the lock
         // themselves.
-        let codex_update_switch_guard = if matches!(app_type, AppType::Codex)
+        let codex_update_switch_guard = if matches!(app_type, AppType::Claude | AppType::Codex)
             || original_id.starts_with(&format!("universal-{}-", app_type.as_str()))
             || provider
                 .meta
@@ -4948,6 +4972,22 @@ impl ProviderService {
             return Ok(true);
         }
 
+        // Ordinary Claude/Codex updates must also hold the lock through the
+        // write: a concurrent explicit link must never be overwritten by an old row.
+        if matches!(app_type, AppType::Claude | AppType::Codex) {
+            state.db.save_provider(app_type.as_str(), &provider)?;
+            if is_current {
+                let outcome = live::sync_live_for_provider_respecting_takeover_locked(
+                    state, &app_type, &provider,
+                )?;
+                if outcome == LiveSyncOutcome::WroteLive
+                    && McpService::sync_enabled_for_app(state, &app_type).is_err()
+                {
+                    log::warn!("Provider saved; MCP projection failed");
+                }
+            }
+            return Ok(true);
+        }
         drop(codex_update_switch_guard);
 
         // Save to database
@@ -4984,8 +5024,27 @@ impl ProviderService {
     /// 同时检查本地 settings 和数据库的当前供应商，防止删除任一端正在使用的供应商。
     /// 对于累加模式应用（OpenCode, OpenClaw），可以随时删除任意供应商，同时从 live 配置中移除。
     pub fn delete(state: &AppState, app_type: AppType, id: &str) -> Result<(), AppError> {
-        if let Some(channel_id) = id.strip_prefix(&format!("universal-{}-", app_type.as_str())) {
-            if state.db.get_universal_provider(channel_id)?.is_some() {
+        let _shared_delete_guard =
+            if matches!(app_type, AppType::Claude | AppType::Codex | AppType::Gemini) {
+                Some(futures::executor::block_on(
+                    state.proxy_service.lock_switch_for_app(app_type.as_str()),
+                ))
+            } else {
+                None
+            };
+        let existing = state.db.get_provider_by_id(id, app_type.as_str())?;
+        let prefix = format!("universal-{}-", app_type.as_str());
+        let channel_id = existing
+            .as_ref()
+            .and_then(|provider| provider.meta.as_ref())
+            .and_then(|meta| meta.shared_channel_id.as_deref())
+            .or_else(|| id.strip_prefix(&prefix));
+        if let Some(channel_id) = channel_id {
+            if state
+                .db
+                .get_universal_provider(channel_id)?
+                .is_some_and(|channel| channel.child_id(app_type.as_str()) == id)
+            {
                 return Err(AppError::localized(
                     "shared_channel.delete_child",
                     "请在共享渠道中停用此应用或删除渠道，以保持关联配置一致。",
@@ -5563,6 +5622,17 @@ impl ProviderService {
         if app_type.is_additive_mode() || legacy_snippet.trim().is_empty() {
             return Ok(());
         }
+
+        // Called by import/common-preference migration, before any switch lock.
+        // Read each provider only after adoption/rotation has finished.
+        let _shared_migration_guard =
+            if matches!(app_type, AppType::Claude | AppType::Codex | AppType::Gemini) {
+                Some(futures::executor::block_on(
+                    state.proxy_service.lock_switch_for_app(app_type.as_str()),
+                ))
+            } else {
+                None
+            };
 
         let providers = state.db.get_all_providers(app_type.as_str())?;
 
@@ -6375,15 +6445,13 @@ impl ProviderService {
         app_type: AppType,
         updates: Vec<ProviderSortUpdate>,
     ) -> Result<bool, AppError> {
-        let mut providers = state.db.get_all_providers(app_type.as_str())?;
-
-        for update in updates {
-            if let Some(provider) = providers.get_mut(&update.id) {
-                provider.sort_index = Some(update.sort_index);
-                state.db.save_provider(app_type.as_str(), provider)?;
-            }
-        }
-
+        let updates: Vec<_> = updates
+            .into_iter()
+            .map(|update| (update.id, update.sort_index))
+            .collect();
+        state
+            .db
+            .update_provider_sort_indices(app_type.as_str(), &updates)?;
         Ok(true)
     }
 

@@ -143,6 +143,14 @@ impl Database {
         app_type: &str,
     ) -> Result<Option<Provider>, AppError> {
         let conn = lock_conn!(self.conn);
+        Self::get_provider_in_connection(&conn, id, app_type)
+    }
+
+    pub(crate) fn get_provider_in_connection(
+        conn: &rusqlite::Connection,
+        id: &str,
+        app_type: &str,
+    ) -> Result<Option<Provider>, AppError> {
         let result = conn.query_row(
             "SELECT name, settings_config, website_url, category, created_at, sort_index, notes, icon, icon_color, meta, in_failover_queue
              FROM providers WHERE id = ?1 AND app_type = ?2",
@@ -185,6 +193,24 @@ impl Database {
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(AppError::Database(e.to_string())),
         }
+    }
+
+    /// Reordering must not rewrite connection or relationship snapshots.
+    pub(crate) fn update_provider_sort_indices(
+        &self,
+        app_type: &str,
+        updates: &[(String, usize)],
+    ) -> Result<(), AppError> {
+        let mut conn = lock_conn!(self.conn);
+        let tx = conn.transaction()?;
+        for (id, sort_index) in updates {
+            tx.execute(
+                "UPDATE providers SET sort_index = ?1 WHERE id = ?2 AND app_type = ?3",
+                params![sort_index, id, app_type],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn save_provider(&self, app_type: &str, provider: &Provider) -> Result<(), AppError> {

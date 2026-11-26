@@ -731,6 +731,10 @@ pub struct SharedChannelConnection {
     pub base_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_format: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key_field: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requires_openai_auth: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -766,6 +770,13 @@ pub struct UniversalProvider {
     pub models: UniversalProviderModels,
     #[serde(default)]
     pub connections: SharedChannelConnections,
+    /// Explicitly adopted provider IDs. Empty keeps legacy generated IDs.
+    #[serde(
+        default,
+        rename = "childIds",
+        skip_serializing_if = "HashMap::is_empty"
+    )]
+    pub child_ids: HashMap<String, String>,
     /// 网站链接
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "websiteUrl")]
@@ -811,6 +822,7 @@ impl UniversalProvider {
             api_key,
             models: UniversalProviderModels::default(),
             connections: SharedChannelConnections::default(),
+            child_ids: HashMap::new(),
             website_url: None,
             notes: None,
             icon: None,
@@ -819,6 +831,17 @@ impl UniversalProvider {
             created_at: Some(chrono::Utc::now().timestamp_millis()),
             sort_index: None,
         }
+    }
+
+    pub fn child_id(&self, app: &str) -> String {
+        self.child_ids
+            .get(app)
+            .cloned()
+            .unwrap_or_else(|| format!("universal-{app}-{}", self.id))
+    }
+
+    pub fn has_adopted_child(&self, app: &str) -> bool {
+        self.child_ids.contains_key(app)
     }
 
     fn connection_url<'a>(&'a self, connection: Option<&'a SharedChannelConnection>) -> &'a str {
@@ -861,6 +884,9 @@ impl UniversalProvider {
                 })
                 .unwrap_or_else(|| default_format.to_string()),
         );
+        if let Some(field) = connection.and_then(|connection| connection.api_key_field.clone()) {
+            meta.api_key_field = Some(field);
+        }
         Some(meta)
     }
 
@@ -884,7 +910,7 @@ impl UniversalProvider {
             .and_then(|m| m.opus_model.clone())
             .unwrap_or_else(|| model.clone());
 
-        let settings_config = serde_json::json!({
+        let mut settings_config = serde_json::json!({
             "env": {
                 "ANTHROPIC_BASE_URL": self.connection_url(self.connections.claude.as_ref()),
                 "ANTHROPIC_AUTH_TOKEN": self.api_key,
@@ -895,8 +921,21 @@ impl UniversalProvider {
             }
         });
 
+        if self
+            .connections
+            .claude
+            .as_ref()
+            .and_then(|connection| connection.api_key_field.as_deref())
+            == Some("ANTHROPIC_API_KEY")
+        {
+            let env = settings_config["env"]
+                .as_object_mut()
+                .expect("generated env");
+            env.remove("ANTHROPIC_AUTH_TOKEN");
+            env.insert("ANTHROPIC_API_KEY".into(), self.api_key.clone().into());
+        }
         Some(Provider {
-            id: format!("universal-claude-{}", self.id),
+            id: self.child_id("claude"),
             name: self.name.clone(),
             settings_config,
             website_url: self.website_url.clone(),
@@ -929,13 +968,18 @@ impl UniversalProvider {
         let base_trimmed = self
             .connection_url(self.connections.codex.as_ref())
             .trim_end_matches('/');
-        let codex_base_url = match url::Url::parse(base_trimmed) {
-            Ok(mut url) if url.path().trim_matches('/').is_empty() => {
-                // Preserve query parameters when adding the default path.
-                url.set_path("/v1");
-                url.to_string()
+        let codex_base_url = if self.has_adopted_child("codex") {
+            self.connection_url(self.connections.codex.as_ref())
+                .to_string()
+        } else {
+            match url::Url::parse(base_trimmed) {
+                Ok(mut url) if url.path().trim_matches('/').is_empty() => {
+                    // Preserve query parameters when adding the default path.
+                    url.set_path("/v1");
+                    url.to_string()
+                }
+                _ => base_trimmed.to_string(),
             }
-            _ => base_trimmed.to_string(),
         };
 
         // toml_edit escapes user-entered names, models and URLs correctly.
@@ -951,7 +995,19 @@ impl UniversalProvider {
         // Codex clients always speak Responses. The upstream protocol belongs
         // to meta.apiFormat and is converted only by the local proxy.
         config["model_providers"]["custom"]["wire_api"] = toml_edit::value("responses");
-        config["model_providers"]["custom"]["requires_openai_auth"] = toml_edit::value(true);
+        if self.has_adopted_child("codex") {
+            if let Some(requires_auth) = self
+                .connections
+                .codex
+                .as_ref()
+                .and_then(|connection| connection.requires_openai_auth)
+            {
+                config["model_providers"]["custom"]["requires_openai_auth"] =
+                    toml_edit::value(requires_auth);
+            }
+        } else {
+            config["model_providers"]["custom"]["requires_openai_auth"] = toml_edit::value(true);
+        }
         let config_toml = config.to_string();
 
         let settings_config = serde_json::json!({
@@ -962,7 +1018,7 @@ impl UniversalProvider {
         });
 
         Some(Provider {
-            id: format!("universal-codex-{}", self.id),
+            id: self.child_id("codex"),
             name: self.name.clone(),
             settings_config,
             website_url: self.website_url.clone(),
@@ -997,7 +1053,7 @@ impl UniversalProvider {
         });
 
         Some(Provider {
-            id: format!("universal-gemini-{}", self.id),
+            id: self.child_id("gemini"),
             name: self.name.clone(),
             settings_config,
             website_url: self.website_url.clone(),

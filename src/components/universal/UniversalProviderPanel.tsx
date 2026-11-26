@@ -1,11 +1,12 @@
 import { useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Layers, Plus } from "lucide-react";
+import { Layers, Link2, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { UniversalProviderCard } from "./UniversalProviderCard";
 import { UniversalProviderFormModal } from "./UniversalProviderFormModal";
+import { SharedChannelLinkModal } from "./SharedChannelLinkModal";
 import { universalProvidersApi } from "@/lib/api";
 import type {
   SharedChannelApp,
@@ -31,6 +32,7 @@ export function UniversalProviderPanel({
   const [providers, setProviders] = useState<UniversalProvidersMap>({});
   const [loading, setLoading] = useState(true);
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isLinkOpen, setIsLinkOpen] = useState(false);
   const [editingProvider, setEditingProvider] =
     useState<UniversalProvider | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -56,9 +58,9 @@ export function UniversalProviderPanel({
   }, [loadProviders]);
 
   useEffect(() => {
-    onFormOpenChange?.(isFormOpen);
+    onFormOpenChange?.(isFormOpen || isLinkOpen);
     return () => onFormOpenChange?.(false);
-  }, [isFormOpen, onFormOpenChange]);
+  }, [isFormOpen, isLinkOpen, onFormOpenChange]);
 
   useEffect(() => {
     if (!initialEditId || loading) return;
@@ -125,8 +127,10 @@ export function UniversalProviderPanel({
 
   const handleDuplicate = useCallback(
     (provider: UniversalProvider) => {
+      const copy = deepClone(provider);
+      delete copy.childIds;
       setEditingProvider({
-        ...deepClone(provider),
+        ...copy,
         id: crypto.randomUUID(),
         name: t("universalProvider.copyName", { name: provider.name }),
         createdAt: Date.now(),
@@ -150,6 +154,15 @@ export function UniversalProviderPanel({
         </span>
         <Button
           className="ml-auto"
+          data-testid="shared-channel-link-open"
+          size="sm"
+          variant="outline"
+          onClick={() => setIsLinkOpen(true)}
+        >
+          <Link2 className="mr-1.5 h-4 w-4" />
+          {t("universalProvider.link.open")}
+        </Button>
+        <Button
           data-testid="shared-channel-add"
           size="sm"
           onClick={() => {
@@ -212,12 +225,28 @@ export function UniversalProviderPanel({
         editingProvider={editingProvider}
         initialApp={initialApp}
       />
+      {isLinkOpen && (
+        <SharedChannelLinkModal
+          onClose={() => {
+            setIsLinkOpen(false);
+            void loadProviders();
+          }}
+          onLinked={loadProviders}
+        />
+      )}
       <ConfirmDialog
         isOpen={deleteConfirm.open}
         title={t("universalProvider.deleteConfirmTitle")}
-        message={t("universalProvider.deleteConfirmDescription", {
-          name: deleteConfirm.name,
-        })}
+        message={t(
+          Object.values(providers[deleteConfirm.id]?.childIds ?? {}).some(
+            Boolean,
+          )
+            ? "universalProvider.link.deleteDescription"
+            : "universalProvider.deleteConfirmDescription",
+          {
+            name: deleteConfirm.name,
+          },
+        )}
         confirmText={t("common.delete")}
         pending={busyId === deleteConfirm.id}
         onConfirm={handleDelete}
