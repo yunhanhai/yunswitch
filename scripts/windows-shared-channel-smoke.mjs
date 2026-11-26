@@ -502,17 +502,58 @@ export async function exerciseSharedChannels(cdp, { check, until, label }) {
     await cdp.screenshot(
       `${label.replaceAll(" ", "-")}-shared-channel-current-editor.png`,
     );
-    await click('button[type="submit"][form="provider-form"]');
-    await until(async () => {
-      const provider = await child("codex");
-      return (
-        provider.notes === independentCodexNote &&
-        provider.settingsConfig.config.includes(independentCodexModel) &&
-        /model_context_window\s*=\s*1000000/.test(
-          provider.settingsConfig.config,
-        )
+    await cdp.evaluate(`(() => {
+      const original = window.fetch;
+      window.__sharedEditProbe = {original, calls:0, response:null};
+      window.fetch = async function(input, ...rest) {
+        const url = new URL(typeof input === 'string' ? input : input.url);
+        const response = await original.call(this, input, ...rest);
+        if (url.hostname === 'ipc.localhost' && url.pathname === '/update_provider') {
+          window.__sharedEditProbe.calls += 1;
+          window.__sharedEditProbe.response = await response.clone().text();
+        }
+        return response;
+      };
+    })()`);
+    try {
+      await click('button[type="submit"][form="provider-form"]');
+      await until(async () => {
+        const provider = await child("codex");
+        return (
+          provider.notes === independentCodexNote &&
+          provider.settingsConfig.config.includes(independentCodexModel) &&
+          /model_context_window\s*=\s*1000000/.test(
+            provider.settingsConfig.config,
+          )
+        );
+      }, "save the current linked Codex model, note and advanced option from the actual form");
+    } catch (error) {
+      const stored = await child("codex");
+      const probe = await cdp.evaluate(
+        `({calls:window.__sharedEditProbe.calls,response:window.__sharedEditProbe.response,model:document.querySelector('#codexDefaultModel')?.value,note:document.querySelector('input[name=notes]')?.value,errors:[...document.querySelectorAll('[role=alert],[data-sonner-toast]')].map(e=>e.textContent)})`,
       );
-    }, "save the current linked Codex model, note and advanced option from the actual form");
+      await cdp.screenshot(
+        `${label.replaceAll(" ", "-")}-shared-channel-editor-failure.png`,
+      );
+      // Disposable-runner fixtures only. Deliberately omit auth and configuration text.
+      process.stderr.write(
+        JSON.stringify({
+          sharedEdit: probe,
+          storedNote: stored.notes,
+          storedModelMatches: stored.settingsConfig.config.includes(
+            independentCodexModel,
+          ),
+          storedContextMatches: /model_context_window\s*=\s*1000000/.test(
+            stored.settingsConfig.config,
+          ),
+        }) + "\n",
+      );
+      throw error;
+    } finally {
+      await cdp.evaluate(
+        "window.fetch = window.__sharedEditProbe.original; delete window.__sharedEditProbe;",
+      );
+    }
     assertCodexConnection(await child("codex"), key, base);
     await cdp.invoke("switch_provider", {
       app: "codex",
