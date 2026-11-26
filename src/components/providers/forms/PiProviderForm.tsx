@@ -1317,8 +1317,8 @@ export function PiProviderForm({
         id="provider-form"
         onSubmit={form.handleSubmit(submit)}
         noValidate
-        onInputCapture={onFieldChange}
-        onChangeCapture={(event) => {
+        onInput={onFieldChange}
+        onChange={(event) => {
           onFieldChange(event);
           if (formError) setFormError(null);
         }}

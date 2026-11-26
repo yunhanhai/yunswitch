@@ -44,6 +44,8 @@ export function useProviderDraftChange(
     [markDirty],
   );
 
+  // Run after the field's own handler. Updating the parent in capture can
+  // restore a controlled input's old value before its change handler runs.
   const onFieldChange = useCallback(
     (event: FormEvent) => {
       const element = event.target;

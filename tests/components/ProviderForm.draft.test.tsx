@@ -428,3 +428,45 @@ it("retains saved and edited Codex mappings when background catalogs arrive", as
   );
   expect(screen.getByLabelText("实际请求模型")).toHaveValue("user-draft-model");
 });
+
+it("retains native input events when dirty tracking rerenders the parent", async () => {
+  function Parent() {
+    const [dirty, setDirty] = useState(false);
+    return (
+      <>
+        <output data-testid="native-dirty">{String(dirty)}</output>
+        <ProviderForm
+          appId="claude"
+          providerId="native"
+          submitLabel="save"
+          onSubmit={() => {}}
+          onCancel={() => {}}
+          onDirtyChange={setDirty}
+          initialData={initial}
+        />
+      </>
+    );
+  }
+  const initial = {
+    name: "Synthetic",
+    category: "custom" as const,
+    settingsConfig: {
+      env: {
+        ANTHROPIC_AUTH_TOKEN: "fake",
+        ANTHROPIC_BASE_URL: "http://127.0.0.1:9",
+      },
+    },
+    meta: { requestBudget: { recoveryTimeoutSecs: 2 } },
+  };
+  render(
+    <QueryClientProvider client={createTestQueryClient()}>
+      <Parent />
+    </QueryClientProvider>,
+  );
+  const budget = await screen.findByLabelText(
+    zh.providerBudget.recoveryTimeoutSecs,
+  );
+  fireEvent.input(budget, { target: { value: "3" } });
+  expect(budget).toHaveValue(3);
+  expect(screen.getByTestId("native-dirty")).toHaveTextContent("true");
+});

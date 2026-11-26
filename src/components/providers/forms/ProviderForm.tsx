@@ -2312,8 +2312,8 @@ function ProviderFormFull({
       <Form {...form}>
         <form
           id="provider-form"
-          onChangeCapture={onFieldChange}
-          onInputCapture={onFieldChange}
+          onChange={onFieldChange}
+          onInput={onFieldChange}
           onSubmit={form.handleSubmit(handleSubmit)}
           className="space-y-6 glass rounded-xl p-6 border border-white/10"
         >
