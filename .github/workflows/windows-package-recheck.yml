@@ -33,7 +33,7 @@ on:
         description: "Previous public YunSwitch tag for MSI upgrade acceptance"
         required: false
         type: string
-        default: v3.20.1-yunswitch.7
+        default: v3.20.1-yunswitch.8
 
 permissions:
   actions: read
@@ -105,6 +105,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PREVIOUS_TAG: ${{ inputs.previous_tag }}
+          PACKAGE_SOURCE_SHA: ${{ inputs.package_source_sha }}
         run: |
           $ErrorActionPreference = 'Stop'
           $version = (Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json).version
@@ -117,7 +118,8 @@ jobs:
             'scripts/windows-release-smoke.mjs',
             '--msi', "release-assets/YunSwitch-v$version-Windows.msi",
             '--zip', "release-assets/YunSwitch-v$version-Windows-Portable.zip",
-            '--output', "$env:RUNNER_TEMP/yunswitch-smoke"
+            '--output', "$env:RUNNER_TEMP/yunswitch-smoke",
+            '--source-commit', $env:PACKAGE_SOURCE_SHA
           )
           if (Test-Path -LiteralPath THIRD-PARTY-NOTICES.md) {
             $smokeArgs += @('--require-third-party-notices', 'true')
@@ -143,6 +145,7 @@ jobs:
             if ($env:PREVIOUS_TAG -eq 'v3.20.1-yunswitch.5' -and $previousHash -ne '54e1a2de96be0cd9b46d2b818dee63d6a95f4194669677d197b9ad049ec27b14') { throw 'Fifth prerelease MSI differs from the recorded accepted package' }
             if ($env:PREVIOUS_TAG -eq 'v3.20.1-yunswitch.6' -and $previousHash -ne '5ca0febf89b882fc901fe0515bef661a1ca022f6cff6725064147212e058a2ec') { throw 'Sixth prerelease MSI differs from the recorded accepted package' }
             if ($env:PREVIOUS_TAG -eq 'v3.20.1-yunswitch.7' -and $previousHash -ne '4e031e6fa4c9f8fd695c7d4f2dad29d86f247eb8f2aac81bb4a5652aad6a539d') { throw 'Seventh prerelease MSI differs from the recorded accepted package' }
+            if ($env:PREVIOUS_TAG -eq 'v3.20.1-yunswitch.8' -and $previousHash -ne '379a7c0b314d0f1b7ced7409d9e94adf5040142640c3dcb9f0ee899e82624930') { throw 'Eighth prerelease MSI differs from the recorded accepted package' }
             $smokeArgs += @('--previous-msi', $previousPath, '--previous-msi-sha256', $previousHash, '--previous-version', $env:PREVIOUS_TAG.Substring(1))
           }
           node @smokeArgs

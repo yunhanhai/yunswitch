@@ -388,6 +388,89 @@ async function verifyIdentity(cdp, portable, version = expectedVersion) {
   );
 }
 
+async function exerciseBuildInfo(cdp, label) {
+  const expected = {
+    version: expectedVersion,
+    sourceCommit: args["source-commit"],
+    target: "x86_64-pc-windows-msvc",
+  };
+  assert.deepEqual(await cdp.invoke("get_build_info"), expected);
+  check(`${label} embedded build identity matches accepted source`, expected);
+  await until(
+    () =>
+      cdp.evaluate(`(() => {
+      if (document.querySelector('[role="tab"][id$="-trigger-about"]')) return true;
+      const button = [...document.querySelectorAll('button[title]')]
+        .find(item => /^(Settings|设置)$/.test(item.title));
+      if (!button) return false;
+      button.click();
+      return true;
+    })()`),
+    "open settings for build information",
+  );
+  await until(
+    () =>
+      cdp.evaluate(`(() => {
+      const tab = document.querySelector('[role="tab"][id$="-trigger-about"]');
+      if (!tab) return false;
+      if (tab.getAttribute('aria-selected') === 'true') return true;
+      tab.dispatchEvent(new MouseEvent('mousedown', {bubbles: true, button: 0}));
+      return false;
+    })()`),
+    "open About tab",
+  );
+  await until(
+    () =>
+      cdp.evaluate(
+        `document.querySelector('[data-testid="build-source"]')?.getAttribute('data-source-commit') === ${JSON.stringify(expected.sourceCommit)}`,
+      ),
+    "render the compiled source commit",
+  );
+  assert.equal(
+    await cdp.evaluate(
+      `document.querySelector('[data-testid="build-target"]').textContent`,
+    ),
+    expected.target,
+  );
+  await powershell("Set-Clipboard -Value 'synthetic-build-info-placeholder'");
+  assert.equal(
+    await cdp.evaluate(`(() => {
+      const button = document.querySelector('[data-testid="copy-build-info"]');
+      if (!button || button.disabled) return false;
+      button.scrollIntoView({block: 'center'});
+      button.click();
+      return true;
+    })()`),
+    true,
+  );
+  await until(async () => {
+    const clipboard = await powershell("Get-Clipboard -Raw");
+    try {
+      return JSON.stringify(JSON.parse(clipboard)) === JSON.stringify(expected);
+    } catch {
+      return false;
+    }
+  }, "copy only the three build identity fields");
+  await cdp.screenshot(`${label.replaceAll(" ", "-")}-build-info.png`);
+  check(`${label} About UI displays source and copies safe build identity`);
+  assert.equal(
+    await cdp.evaluate(`(() => {
+      const button = document.querySelector('button:has(svg.lucide-arrow-left)');
+      if (!button) return false;
+      button.click();
+      return true;
+    })()`),
+    true,
+  );
+  await until(
+    () =>
+      cdp.evaluate(
+        `!document.querySelector('[role="tab"][id$="-trigger-about"]')`,
+      ),
+    "return to providers after build information",
+  );
+}
+
 async function exerciseProxy(cdp) {
   const requests = [];
   mock = createServer(async (request, response) => {
@@ -1077,6 +1160,7 @@ async function verifyUpgrade(previous, current, installedExe, portableExe) {
     );
   }
   await verifySingleInstance(installedExe);
+  await exerciseBuildInfo(cdp, "upgraded MSI");
   await exerciseModelCatalog(cdp, "upgraded MSI");
   await exerciseProviderBudgets(cdp, { check, until, label: "upgraded MSI" });
   await exerciseCodexCompatibility(cdp, {
@@ -1141,6 +1225,11 @@ async function verifyNoticeUninstall(packageRoot, label) {
 
 async function main() {
   await freshRunnerGuard();
+  assert.match(
+    args["source-commit"] ?? "",
+    /^[0-9a-f]{40}$/,
+    "Provide the exact package source commit",
+  );
   assert.ok(
     args.msi && args.zip && args.output,
     "Usage: --msi file --zip file --output directory",
@@ -1260,6 +1349,7 @@ async function main() {
     "welcome confirmation persistence",
   );
   check("first-run UI renders and its confirmation persists");
+  await exerciseBuildInfo(cdp, "portable");
   await exerciseProxy(cdp);
   await exerciseModelCatalog(cdp, "portable");
   await exerciseProviderBudgets(cdp, { check, until, label: "portable" });

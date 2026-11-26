@@ -872,6 +872,17 @@
     "checking": "檢查中...",
     "upToDate": "已是最新",
     "aboutHint": "檢視版本資訊與更新狀態。",
+    "buildInfo": {
+      "title": "建置資訊",
+      "source": "原始碼提交",
+      "sourceUnknown": "未記錄（本機建置）",
+      "target": "目標平台",
+      "copy": "複製建置資訊",
+      "copyHint": "僅複製版本、完整原始碼提交（未記錄時為 null）和目標平台。",
+      "copied": "已複製建置資訊。",
+      "copyFailed": "無法複製建置資訊。",
+      "loadFailed": "無法讀取建置資訊，請重新開啟關於頁重試。"
+    },
     "portableMode": "目前為可攜版，更新需手動下載。",
     "updateAvailable": "檢測到新版本：{{version}}",
     "updateBadge": "有更新可用",
