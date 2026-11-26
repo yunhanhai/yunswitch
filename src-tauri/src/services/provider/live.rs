@@ -693,6 +693,13 @@ pub(crate) fn build_effective_settings_with_common_config(
         }
     }
 
+    super::shared_channel::reapply_shared_settings(
+        db,
+        app_type,
+        provider,
+        &mut effective_settings,
+    )?;
+
     if matches!(app_type, AppType::Claude) {
         apply_codex_oauth_claude_context_defaults(&mut effective_settings, provider);
         apply_kimi_for_coding_context_defaults(&mut effective_settings, provider);
@@ -1161,7 +1168,10 @@ pub(crate) fn normalize_provider_common_config_for_storage(
     }
 
     match remove_common_config_from_settings(app_type, &provider.settings_config, &snippet) {
-        Ok(settings) => provider.settings_config = settings,
+        Ok(mut settings) => {
+            super::shared_channel::reapply_shared_settings(db, app_type, provider, &mut settings)?;
+            provider.settings_config = settings;
+        }
         Err(err) => {
             log::warn!(
                 "Failed to normalize common config before saving {} provider '{}': {err}",
@@ -1489,6 +1499,7 @@ fn proxy_owns_live_config(
     app_type: &AppType,
     has_live_backup: bool,
     live_taken_over: bool,
+    switch_lock_held: bool,
 ) -> bool {
     if live_taken_over {
         return true;
@@ -1519,7 +1530,8 @@ fn proxy_owns_live_config(
         return true;
     }
 
-    has_live_backup
+    !switch_lock_held
+        && has_live_backup
         && futures::executor::block_on(
             state
                 .proxy_service
@@ -1581,7 +1593,13 @@ fn sync_live_for_provider_respecting_takeover_inner(
         .proxy_service
         .detect_takeover_in_live_config_for_app(app_type);
 
-    if !proxy_owns_live_config(state, app_type, has_live_backup, live_taken_over) {
+    if !proxy_owns_live_config(
+        state,
+        app_type,
+        has_live_backup,
+        live_taken_over,
+        switch_lock_held,
+    ) {
         // A stale backup must follow the provider too, otherwise a later restore
         // can resurrect the old URL and undo the live write we are making now.
         if has_live_backup {

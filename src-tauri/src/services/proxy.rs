@@ -2868,6 +2868,21 @@ impl ProxyService {
 
         if matches!(app_type_enum, AppType::Codex) {
             let is_codex_official = crate::proxy::providers::is_codex_official_provider(provider);
+            if self.is_shared_channel_child(&app_type_enum, provider)? {
+                // Shared third-party restore sources must already contain the
+                // scoped bearer used by current Codex clients. auth.json may
+                // intentionally be absent or preserve an unrelated OAuth login.
+                let config = effective_settings
+                    .get("config")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let prepared = crate::codex_config::prepare_codex_provider_live_config(
+                    effective_settings.get("auth").unwrap_or(&Value::Null),
+                    config,
+                )
+                .map_err(|_| "Unable to prepare shared Codex restore configuration".to_string())?;
+                effective_settings["config"] = json!(prepared);
+            }
             let existing_backup_value = self
                 .db
                 .get_live_backup(app_type)

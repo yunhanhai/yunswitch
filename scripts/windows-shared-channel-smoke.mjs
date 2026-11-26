@@ -41,14 +41,36 @@ export async function exerciseSharedChannels(cdp, { check, until, label }) {
               stop_sequence: null,
               usage: { input_tokens: 1, output_tokens: 1 },
             }
-          : {
-              id: "resp_synthetic_shared",
-              object: "response",
-              status: "completed",
-              model: "synthetic-shared-model",
-              output: [],
-              usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
-            },
+          : request.url.endsWith("/chat/completions")
+            ? {
+                id: "chatcmpl_synthetic_shared",
+                object: "chat.completion",
+                created: 1,
+                model: "synthetic-shared-model",
+                choices: [
+                  {
+                    index: 0,
+                    message: {
+                      role: "assistant",
+                      content: "synthetic shared result",
+                    },
+                    finish_reason: "stop",
+                  },
+                ],
+                usage: {
+                  prompt_tokens: 1,
+                  completion_tokens: 1,
+                  total_tokens: 2,
+                },
+              }
+            : {
+                id: "resp_synthetic_shared",
+                object: "response",
+                status: "completed",
+                model: "synthetic-shared-model",
+                output: [],
+                usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+              },
       ),
     );
   });
@@ -161,6 +183,7 @@ export async function exerciseSharedChannels(cdp, { check, until, label }) {
   async function sendBoth(
     expectedKey,
     expectedPaths = ["/v1/messages", "/v1/responses"],
+    expectConvertedCodex = false,
   ) {
     const offset = requests.length;
     await Promise.all(
@@ -193,7 +216,26 @@ export async function exerciseSharedChannels(cdp, { check, until, label }) {
           },
         );
         assert.equal(response.status, 200);
-        await response.json();
+        const body = await response.json();
+        if (app === "codex") {
+          assert.equal(body.object, "response");
+          assert.equal(body.status, "completed");
+          if (expectConvertedCodex) {
+            assert.ok(
+              body.output.some((item) =>
+                item.content?.some(
+                  (part) =>
+                    part.type === "output_text" &&
+                    part.text === "synthetic shared result",
+                ),
+              ),
+              "converted response preserves the synthetic text in Responses shape",
+            );
+          }
+        } else {
+          assert.equal(body.type, "message");
+          assert.equal(body.stop_reason, "end_turn");
+        }
       }),
     );
     const recent = requests.slice(offset);
@@ -206,7 +248,7 @@ export async function exerciseSharedChannels(cdp, { check, until, label }) {
       assert.ok(
         request.authorization === `Bearer ${expectedKey}` ||
           request.apiKey === expectedKey,
-        "each native protocol uses the shared upstream credential",
+        "each upstream protocol uses the shared credential",
       );
   }
   async function assertStoredUnchanged(before) {
@@ -357,6 +399,10 @@ export async function exerciseSharedChannels(cdp, { check, until, label }) {
     assert.ok(!JSON.stringify(preview).includes(key));
     assert.equal(preview.claude.meta.apiFormat, "openai_responses");
     assert.equal(preview.codex.meta.apiFormat, "anthropic");
+    assert.match(
+      preview.codex.settingsConfig.config,
+      /wire_api\s*=\s*"responses"/,
+    );
     assert.equal(
       preview.claude.settingsConfig.env.ANTHROPIC_BASE_URL,
       `${base}/claude`,
@@ -486,10 +532,51 @@ export async function exerciseSharedChannels(cdp, { check, until, label }) {
     };
     await save(channel);
     await sendBoth(key, ["/claude/v1/messages", "/codex/v1/responses"]);
-    assert.deepEqual((await saved()).connections, channel.connections);
+    const savedConnections = (await saved()).connections;
+    for (const app of apps)
+      assert.deepEqual(savedConnections[app], channel.connections[app]);
     check(
       `${label} a shared key supports independent client addresses and native protocols without changing active selections`,
     );
+
+    const nativeConnections = structuredClone(channel.connections);
+    for (const [apiFormat, path] of [
+      ["openai_chat", "/codex/v1/chat/completions"],
+      ["anthropic", "/codex/v1/messages"],
+    ]) {
+      channel = {
+        ...channel,
+        connections: {
+          ...nativeConnections,
+          codex: { ...nativeConnections.codex, apiFormat },
+        },
+      };
+      await save(channel);
+      const convertedChild = await child("codex");
+      assertCodexConnection(convertedChild, key, `${base}/codex/v1`);
+      assert.equal(convertedChild.meta.apiFormat, apiFormat);
+      const convertedLive = await cdp.invoke("read_live_provider_settings", {
+        app: "codex",
+      });
+      assert.match(convertedLive.config, /wire_api\s*=\s*"responses"/);
+      const offset = requests.length;
+      await sendBoth(key, ["/claude/v1/messages", path], true);
+      const convertedRequest = requests
+        .slice(offset)
+        .find((request) => request.path === path);
+      assert.ok(Array.isArray(convertedRequest.body.messages));
+      assert.equal(convertedRequest.body.input, undefined);
+      assert.ok(
+        JSON.stringify(convertedRequest.body.messages).includes(
+          "synthetic request",
+        ),
+      );
+      check(
+        `${label} shared Codex ${apiFormat} upstream converts a bounded loopback request and response while its live wire remains Responses and Claude stays native`,
+      );
+    }
+    channel = { ...channel, connections: nativeConnections };
+    await save(channel);
 
     channel = {
       ...channel,

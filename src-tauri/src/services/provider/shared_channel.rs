@@ -306,6 +306,79 @@ fn merge_child(
     Ok(merged)
 }
 
+/// Common preferences may add models, hooks and MCP options, but cannot
+/// replace a shared channel's effective connection or remove it from storage.
+pub(super) fn reapply_shared_settings(
+    db: &crate::database::Database,
+    app: &AppType,
+    provider: &Provider,
+    settings: &mut Value,
+) -> Result<(), AppError> {
+    let prefix = format!("universal-{}-", app.as_str());
+    let id = provider
+        .meta
+        .as_ref()
+        .and_then(|meta| meta.shared_channel_id.as_deref())
+        .or_else(|| provider.id.strip_prefix(&prefix));
+    let Some(channel) = id
+        .map(|id| db.get_universal_provider(id))
+        .transpose()?
+        .flatten()
+    else {
+        return Ok(());
+    };
+    let Some(generated) = child(&channel, app) else {
+        return Err(invalid_channel());
+    };
+    if generated.id != provider.id {
+        return Err(invalid_channel());
+    }
+    let mut effective = provider.clone();
+    effective.settings_config = settings.clone();
+    // The common snippet must not select another provider table. Preserve the
+    // child's own selector and reapply managed fields to that table.
+    let missing_models = if *app == AppType::Codex {
+        let original = codex_document(provider)?;
+        let mut document = codex_document(&effective)?;
+        let missing = ["model", "model_reasoning_effort"]
+            .into_iter()
+            .filter(|key| document.get(key).is_none())
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        document["model_provider"] = toml_edit::value(codex_provider_id(&original));
+        effective.settings_config["config"] = Value::String(document.to_string());
+        missing
+    } else {
+        generated.settings_config["env"]
+            .as_object()
+            .into_iter()
+            .flat_map(|env| env.keys())
+            .filter(|key| key.contains("MODEL") && settings["env"].get(*key).is_none())
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let mut merged = merge_child(app, generated, None, Some(effective))?;
+    // Common model defaults remain common; do not materialize them back into
+    // stored children merely because the credential fields were restored.
+    if *app == AppType::Codex {
+        let mut document = codex_document(&merged)?;
+        for key in missing_models {
+            document.remove(&key);
+        }
+        merged.settings_config["config"] = Value::String(document.to_string());
+    } else if let Some(env) = merged
+        .settings_config
+        .get_mut("env")
+        .and_then(Value::as_object_mut)
+    {
+        for key in missing_models {
+            env.remove(&key);
+        }
+    }
+    *settings = merged.settings_config;
+    Ok(())
+}
+
 impl ProviderService {
     pub(super) fn validate_shared_child_add(
         app: &AppType,
@@ -774,6 +847,13 @@ mod tests {
     use crate::provider::{CodexModelConfig, SharedChannelConnection};
     use serial_test::serial;
 
+    fn with_shared_test_home(test: impl FnOnce(&AppState, &std::path::Path)) {
+        super::super::tests::with_test_home(|state, home| {
+            crate::settings::reload_settings().unwrap();
+            test(state, home);
+        });
+    }
+
     fn channel() -> UniversalProvider {
         let mut channel = UniversalProvider::new(
             "test-channel".into(),
@@ -955,7 +1035,7 @@ mod tests {
     #[test]
     #[serial]
     fn shared_channel_second_child_database_failure_rolls_back_master_and_first_child() {
-        super::super::tests::with_test_home(|state, _| {
+        with_shared_test_home(|state, _| {
             let original = channel();
             ProviderService::save_shared_channel(state, original.clone()).unwrap();
             state.db.conn.lock().unwrap().execute_batch("CREATE TRIGGER fail_shared_codex_update BEFORE UPDATE ON providers WHEN NEW.app_type = 'codex' BEGIN SELECT RAISE(ABORT, 'synthetic write failure'); END;").unwrap();
@@ -990,7 +1070,7 @@ mod tests {
     #[test]
     #[serial]
     fn shared_channel_legacy_protocol_is_preserved_when_connections_are_absent() {
-        super::super::tests::with_test_home(|state, _| {
+        with_shared_test_home(|state, _| {
             let mut original = channel();
             original.meta = Some(crate::provider::ProviderMeta {
                 api_format: Some("openai_chat".into()),
@@ -1037,7 +1117,7 @@ mod tests {
     #[test]
     #[serial]
     fn shared_channel_takeover_rotates_backup_without_overwriting_proxy_endpoint() {
-        super::super::tests::with_test_home(|state, _| {
+        with_shared_test_home(|state, _| {
             let mut original = channel();
             ProviderService::save_shared_channel(state, original.clone()).unwrap();
             state
@@ -1074,7 +1154,7 @@ mod tests {
     #[test]
     #[serial]
     fn shared_channel_save_creates_both_apps_without_switching() {
-        super::super::tests::with_test_home(|state, _| {
+        with_shared_test_home(|state, _| {
             let result = ProviderService::save_shared_channel(state, channel()).unwrap();
             assert!(result.saved);
             assert_eq!(result.synced_apps, ["claude", "codex"]);
@@ -1093,7 +1173,7 @@ mod tests {
     #[test]
     #[serial]
     fn shared_channel_disable_current_is_atomic_and_delete_is_blocked() {
-        super::super::tests::with_test_home(|state, _| {
+        with_shared_test_home(|state, _| {
             let original = channel();
             ProviderService::save_shared_channel(state, original.clone()).unwrap();
             state
@@ -1129,7 +1209,7 @@ mod tests {
     #[test]
     #[serial]
     fn shared_channel_routing_reference_blocks_removal_until_detached() {
-        super::super::tests::with_test_home(|state, _| {
+        with_shared_test_home(|state, _| {
             let channel = channel();
             ProviderService::save_shared_channel(state, channel.clone()).unwrap();
             let group = state
@@ -1159,7 +1239,7 @@ mod tests {
     #[test]
     #[serial]
     fn shared_channel_partial_live_failure_commits_and_reports_only_app_names() {
-        super::super::tests::with_test_home(|state, _| {
+        with_shared_test_home(|state, _| {
             let mut channel = channel();
             ProviderService::save_shared_channel(state, channel.clone()).unwrap();
             state
@@ -1191,7 +1271,7 @@ mod tests {
     #[test]
     #[serial]
     fn shared_channel_managed_auth_cannot_override_shared_identity() {
-        super::super::tests::with_test_home(|state, _| {
+        with_shared_test_home(|state, _| {
             let channel = channel();
             ProviderService::save_shared_channel(state, channel.clone()).unwrap();
             let original = channel.to_codex_provider().unwrap();
@@ -1239,7 +1319,7 @@ mod tests {
     #[test]
     #[serial]
     fn shared_channel_child_edits_compare_toml_values_and_reject_missing_connection() {
-        super::super::tests::with_test_home(|state, _| {
+        with_shared_test_home(|state, _| {
             let channel = channel();
             ProviderService::save_shared_channel(state, channel.clone()).unwrap();
             let original = channel.to_codex_provider().unwrap();
@@ -1300,7 +1380,7 @@ model_providers = {custom = {base_url = 'https://old.example', request_max_retri
     #[test]
     #[serial]
     fn shared_channel_legacy_orphan_can_be_edited_without_claiming_a_binding() {
-        super::super::tests::with_test_home(|state, _| {
+        with_shared_test_home(|state, _| {
             let mut orphan = channel().to_codex_provider().unwrap();
             orphan.meta.as_mut().unwrap().shared_channel_id = None;
             let mut edited = orphan.clone();
@@ -1328,7 +1408,7 @@ model_providers = {custom = {base_url = 'https://old.example', request_max_retri
     #[test]
     #[serial]
     fn shared_channel_switch_backfill_keeps_live_models_but_restores_shared_connection() {
-        super::super::tests::with_test_home(|state, _| {
+        with_shared_test_home(|state, _| {
             crate::settings::reload_settings().unwrap();
             let original = channel();
             ProviderService::save_shared_channel(state, original.clone()).unwrap();
@@ -1389,7 +1469,7 @@ model_providers = {custom = {base_url = 'https://old.example', request_max_retri
     #[test]
     #[serial]
     fn shared_channel_retry_reads_latest_master_after_acquiring_switch_locks() {
-        super::super::tests::with_test_home(|state, _| {
+        with_shared_test_home(|state, _| {
             let original = channel();
             ProviderService::save_shared_channel(state, original.clone()).unwrap();
             let guard =
@@ -1486,7 +1566,7 @@ model_providers = {custom = {base_url = 'https://old.example', request_max_retri
     #[test]
     #[serial]
     fn shared_channel_legacy_format_hydrates_url_only_and_missing_children_per_app() {
-        super::super::tests::with_test_home(|state, _| {
+        with_shared_test_home(|state, _| {
             let mut channel = channel();
             channel.apps.gemini = true;
             channel.meta = Some(crate::provider::ProviderMeta {
@@ -1577,7 +1657,7 @@ model_providers = {custom = {base_url = 'https://old.example', request_max_retri
     #[test]
     #[serial]
     fn shared_channel_codex_upstream_protocol_never_changes_client_responses_wire() {
-        super::super::tests::with_test_home(|state, _| {
+        with_shared_test_home(|state, _| {
             crate::settings::reload_settings().unwrap();
             for format in ["openai_chat", "anthropic"] {
                 let mut channel = channel();
@@ -1679,6 +1759,183 @@ model_providers = {custom = {base_url = 'https://old.example', request_max_retri
                 let stored = state.db.get_provider_by_id(id, "codex").unwrap().unwrap();
                 assert_eq!(stored.meta.unwrap().api_format.as_deref(), Some(format));
                 crate::settings::set_current_provider(&AppType::Codex, None).unwrap();
+            }
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn shared_channel_stale_backup_does_not_hide_current_live_rotation() {
+        with_shared_test_home(|state, _| {
+            let mut channel = channel();
+            channel.apps.codex = false;
+            ProviderService::save_shared_channel(state, channel.clone()).unwrap();
+            ProviderService::switch(state, AppType::Claude, "universal-claude-test-channel")
+                .unwrap();
+            let child = channel.to_claude_provider().unwrap();
+            futures::executor::block_on(
+                state
+                    .db
+                    .save_live_backup("claude", &child.settings_config.to_string()),
+            )
+            .unwrap();
+            assert!(!futures::executor::block_on(
+                state.proxy_service.is_running()
+            ));
+            assert!(
+                !futures::executor::block_on(state.db.get_proxy_config_for_app("claude"))
+                    .unwrap()
+                    .enabled
+            );
+            channel.api_key = "fake-current-rotated-key".into();
+            let result = ProviderService::save_shared_channel(state, channel).unwrap();
+            assert!(result.failed_apps.is_empty());
+            let live: Value =
+                crate::config::read_json_file(&crate::config::get_claude_settings_path()).unwrap();
+            assert_eq!(
+                live["env"]["ANTHROPIC_AUTH_TOKEN"],
+                "fake-current-rotated-key"
+            );
+            assert_eq!(
+                live["env"]["ANTHROPIC_BASE_URL"],
+                "https://synthetic.example"
+            );
+            let backup = futures::executor::block_on(state.db.get_live_backup("claude"))
+                .unwrap()
+                .unwrap();
+            let backup: Value = serde_json::from_str(&backup.original_config).unwrap();
+            assert_eq!(
+                backup["env"]["ANTHROPIC_AUTH_TOKEN"],
+                "fake-current-rotated-key"
+            );
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn shared_channel_common_config_keeps_preferences_without_owning_connection() {
+        with_shared_test_home(|state, _| {
+            let mut channel = channel();
+            ProviderService::save_shared_channel(state, channel.clone()).unwrap();
+            for app in [AppType::Claude, AppType::Codex] {
+                let id = format!("universal-{}-test-channel", app.as_str());
+                ProviderService::switch(state, app.clone(), &id).unwrap();
+                let mut child = state
+                    .db
+                    .get_provider_by_id(&id, app.as_str())
+                    .unwrap()
+                    .unwrap();
+                child.meta.as_mut().unwrap().common_config_enabled = Some(true);
+                let snippet = if app == AppType::Claude {
+                    serde_json::json!({"env": {
+                        "ANTHROPIC_BASE_URL": "https://synthetic.example",
+                        "ANTHROPIC_AUTH_TOKEN": "sk-fake-before",
+                        "SYNTHETIC_SHARED_PREF": "keep"
+                    }})
+                    .to_string()
+                } else {
+                    "model_provider = 'custom'\n[model_providers.custom]\nbase_url = 'https://synthetic.example/v1'\nwire_api = 'responses'\nrequires_openai_auth = true\n".into()
+                };
+                // Identical snippet fields must not be stripped from the DB child.
+                state
+                    .db
+                    .set_config_snippet(app.as_str(), Some(snippet))
+                    .unwrap();
+                ProviderService::update(state, app.clone(), None, child).unwrap();
+                let stored = state
+                    .db
+                    .get_provider_by_id(&id, app.as_str())
+                    .unwrap()
+                    .unwrap();
+                let mut editable = stored.clone();
+                ProviderService::validate_shared_child_update(
+                    state,
+                    &app,
+                    Some(&stored),
+                    &mut editable,
+                )
+                .unwrap();
+                let conflicting = if app == AppType::Claude {
+                    serde_json::json!({"env": {
+                        "ANTHROPIC_BASE_URL": "https://wrong.example",
+                        "ANTHROPIC_AUTH_TOKEN": "fake-common-key",
+                        "ANTHROPIC_API_KEY": "fake-common-alias",
+                        "SYNTHETIC_SHARED_PREF": "keep"
+                    }})
+                    .to_string()
+                } else {
+                    "model_provider = 'wrong'\napproval_policy = 'never'\n[model_providers.custom]\nbase_url = 'https://wrong.example'\nwire_api = 'chat'\nexperimental_bearer_token = 'fake-common-key'\nenv_key = 'FAKE_COMMON_KEY'\n[model_providers.custom.http_headers]\nAuthorization = 'Bearer fake-common-key'\n[model_providers.wrong]\nname = 'Other'\nbase_url = 'https://wrong.example'\nwire_api = 'responses'\n".into()
+                };
+                state
+                    .db
+                    .set_config_snippet(app.as_str(), Some(conflicting))
+                    .unwrap();
+                ProviderService::update(state, app.clone(), None, editable).unwrap();
+            }
+            channel.api_key = "fake-shared-rotated-key".into();
+            let result = ProviderService::save_shared_channel(state, channel).unwrap();
+            assert!(result.failed_apps.is_empty());
+            use crate::proxy::providers::{ClaudeAdapter, CodexAdapter, ProviderAdapter};
+            for app in [AppType::Claude, AppType::Codex] {
+                let id = format!("universal-{}-test-channel", app.as_str());
+                let mut stored = state
+                    .db
+                    .get_provider_by_id(&id, app.as_str())
+                    .unwrap()
+                    .unwrap();
+                let actual_key = if app == AppType::Claude {
+                    ClaudeAdapter::new().extract_auth(&stored).unwrap().api_key
+                } else {
+                    CodexAdapter::new().extract_auth(&stored).unwrap().api_key
+                };
+                assert_eq!(actual_key, "fake-shared-rotated-key");
+                stored.settings_config =
+                    live::build_effective_settings_with_common_config(&state.db, &app, &stored)
+                        .unwrap();
+                let effective_key = if app == AppType::Claude {
+                    ClaudeAdapter::new().extract_auth(&stored).unwrap().api_key
+                } else {
+                    CodexAdapter::new().extract_auth(&stored).unwrap().api_key
+                };
+                assert_eq!(effective_key, "fake-shared-rotated-key");
+                if app == AppType::Claude {
+                    let actual: Value =
+                        crate::config::read_json_file(&crate::config::get_claude_settings_path())
+                            .unwrap();
+                    assert_eq!(
+                        actual["env"]["ANTHROPIC_AUTH_TOKEN"],
+                        "fake-shared-rotated-key"
+                    );
+                    assert_eq!(
+                        actual["env"]["ANTHROPIC_BASE_URL"],
+                        "https://synthetic.example"
+                    );
+                    assert_eq!(actual["env"]["SYNTHETIC_SHARED_PREF"], "keep");
+                    assert!(actual["env"].get("ANTHROPIC_API_KEY").is_none());
+                } else {
+                    let actual =
+                        std::fs::read_to_string(crate::codex_config::get_codex_config_path())
+                            .unwrap();
+                    let actual: toml_edit::DocumentMut = actual.parse().unwrap();
+                    assert_eq!(actual["model_provider"].as_str(), Some("custom"));
+                    assert_eq!(actual["approval_policy"].as_str(), Some("never"));
+                    assert_eq!(
+                        actual["model_providers"]["custom"]["base_url"].as_str(),
+                        Some("https://synthetic.example/v1")
+                    );
+                    assert_eq!(
+                        actual["model_providers"]["custom"]["wire_api"].as_str(),
+                        Some("responses")
+                    );
+                    assert_eq!(
+                        actual["model_providers"]["custom"]["experimental_bearer_token"].as_str(),
+                        Some("fake-shared-rotated-key")
+                    );
+                    assert!(actual["model_providers"]["custom"].get("env_key").is_none());
+                    assert!(actual["model_providers"]["custom"]["http_headers"]
+                        .get("Authorization")
+                        .is_none());
+                }
             }
         });
     }
