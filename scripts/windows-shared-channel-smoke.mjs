@@ -517,12 +517,17 @@ export async function exerciseSharedChannels(cdp, { check, until, label }) {
     );
     await cdp.evaluate(`(() => {
       const original = window.fetch;
-      window.__sharedEditProbe = {original, calls:0, response:null};
+      window.__sharedEditProbe = {original, calls:0, completed:0, submits:0, invalid:[], response:null};
+      const form=document.getElementById('provider-form');
+      form.addEventListener('submit', () => window.__sharedEditProbe.submits += 1);
+      form.addEventListener('invalid', (event) => window.__sharedEditProbe.invalid.push({id:event.target.id,name:event.target.name,type:event.target.type,message:event.target.validationMessage}), true);
       window.fetch = async function(input, ...rest) {
         const url = new URL(typeof input === 'string' ? input : input.url);
+        const updating=url.hostname === 'ipc.localhost' && url.pathname === '/update_provider';
+        if(updating) window.__sharedEditProbe.calls += 1;
         const response = await original.call(this, input, ...rest);
-        if (url.hostname === 'ipc.localhost' && url.pathname === '/update_provider') {
-          window.__sharedEditProbe.calls += 1;
+        if (updating) {
+          window.__sharedEditProbe.completed += 1;
           window.__sharedEditProbe.response = await response.clone().text();
         }
         return response;
@@ -543,7 +548,7 @@ export async function exerciseSharedChannels(cdp, { check, until, label }) {
     } catch (error) {
       const stored = await child("codex");
       const probe = await cdp.evaluate(
-        `({calls:window.__sharedEditProbe.calls,response:window.__sharedEditProbe.response,model:document.querySelector('#codexDefaultModel')?.value,note:document.querySelector('input[name=notes]')?.value,errors:[...document.querySelectorAll('[role=alert],[data-sonner-toast]')].map(e=>e.textContent)})`,
+        `({calls:window.__sharedEditProbe.calls,completed:window.__sharedEditProbe.completed,submits:window.__sharedEditProbe.submits,invalid:window.__sharedEditProbe.invalid,response:window.__sharedEditProbe.response,model:document.querySelector('#codexDefaultModel')?.value,note:document.querySelector('input[name=notes]')?.value,errors:[...document.querySelectorAll('[role=alert],[data-sonner-toast]')].map(e=>e.textContent),text:document.body.innerText.slice(-3000)})`,
       );
       await cdp.screenshot(
         `${label.replaceAll(" ", "-")}-shared-channel-editor-failure.png`,
