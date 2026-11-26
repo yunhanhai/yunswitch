@@ -163,7 +163,7 @@ function getSortButton() {
 }
 
 function getSearchInput() {
-  return screen.getByRole("textbox", {
+  return screen.getByRole("searchbox", {
     name: /providerPreset\.(searchInput|searchPlaceholder)|搜索预设|search/i,
   });
 }
@@ -502,7 +502,7 @@ describe("ProviderPresetSelector", () => {
 
     // 初始没有搜索输入框
     expect(
-      screen.queryByRole("textbox", {
+      screen.queryByRole("searchbox", {
         name: /providerPreset\.(searchInput|searchPlaceholder)|搜索预设|search/i,
       }),
     ).not.toBeInTheDocument();
@@ -521,7 +521,7 @@ describe("ProviderPresetSelector", () => {
     // ESC 收起输入框并清空
     await user.keyboard("{Escape}");
     expect(
-      screen.queryByRole("textbox", {
+      screen.queryByRole("searchbox", {
         name: /providerPreset\.(searchInput|searchPlaceholder)|搜索预设|search/i,
       }),
     ).not.toBeInTheDocument();
@@ -537,7 +537,7 @@ describe("ProviderPresetSelector", () => {
 
     // 初始没有搜索输入框
     expect(
-      screen.queryByRole("textbox", {
+      screen.queryByRole("searchbox", {
         name: /providerPreset\.(searchInput|searchPlaceholder)|搜索预设|search/i,
       }),
     ).not.toBeInTheDocument();
@@ -607,7 +607,7 @@ describe("ProviderPresetSelector", () => {
     await user.click(screen.getByTestId("outside"));
 
     expect(
-      screen.queryByRole("textbox", {
+      screen.queryByRole("searchbox", {
         name: /providerPreset\.(searchInput|searchPlaceholder)|搜索预设|search/i,
       }),
     ).not.toBeInTheDocument();

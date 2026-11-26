@@ -1,4 +1,13 @@
 {
+  "providerDraft": {
+    "discardTitle": "Discard unsaved changes?",
+    "discardMessage": "Your changes have not been saved. Choose “Keep editing” to retain them, or discard them and start again. Drafts are kept only in this window.",
+    "discard": "Discard changes",
+    "keep": "Keep editing",
+    "loading": "Reading current configuration…",
+    "useSaved": "Continue with saved configuration",
+    "saveFailed": "Saving did not complete. Your changes are still here; check them and try again."
+  },
   "app": {
     "title": "YunSwitch",
     "description": "Configuration and routing manager for AI coding tools"

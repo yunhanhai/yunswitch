@@ -297,6 +297,7 @@ export function ProviderPresetSelector({
         <div className="flex items-center gap-2">
           {searchOpen && (
             <Input
+              type="search"
               ref={searchInputRef}
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}

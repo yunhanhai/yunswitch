@@ -1,3 +1,4 @@
+import { useProviderDraftChange } from "./hooks/useProviderDraftChange";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -388,11 +389,14 @@ export function PiProviderForm({
   onSubmit,
   onCancel,
   onSubmittingChange,
+  onDirtyChange,
   onSubmitReadyChange,
   initialData,
   showButtons = true,
 }: ProviderFormProps) {
   const { t } = useTranslation();
+  const { markDirty, trackChange, onFieldChange } =
+    useProviderDraftChange(onDirtyChange);
   const isDarkMode = useDarkMode();
   const initialConfig = useMemo(
     () => asObject(initialData?.settingsConfig),
@@ -835,6 +839,7 @@ export function PiProviderForm({
     key: string,
     update: Partial<Omit<PiModelDraft, "key">>,
   ) => {
+    markDirty();
     commitModels(
       modelsRef.current.map((model) =>
         model.key === key ? { ...model, ...update } : model,
@@ -843,6 +848,7 @@ export function PiProviderForm({
   };
 
   const changeModelId = (key: string, id: string) => {
+    markDirty();
     commitModels(
       modelsRef.current.map((model) =>
         model.key === key
@@ -864,6 +870,7 @@ export function PiProviderForm({
     key: string,
     update: (map: PiThinkingLevelMap) => PiThinkingLevelMap,
   ) => {
+    markDirty();
     commitModels(
       modelsRef.current.map((model) => {
         if (model.key !== key) return model;
@@ -897,6 +904,7 @@ export function PiProviderForm({
   };
 
   const addModel = () => {
+    markDirty();
     const model = newModel();
     const previouslyIncluded = includeModelsRef.current;
     includeModelsRef.current = true;
@@ -906,6 +914,7 @@ export function PiProviderForm({
   };
 
   const removeModel = (key: string) => {
+    markDirty();
     const nextModels = modelsRef.current.filter((model) => model.key !== key);
     commitModels(nextModels);
     setExpandedModelKeys((current) => {
@@ -1308,7 +1317,9 @@ export function PiProviderForm({
         id="provider-form"
         onSubmit={form.handleSubmit(submit)}
         noValidate
-        onChangeCapture={() => {
+        onInput={onFieldChange}
+        onChange={(event) => {
+          onFieldChange(event);
           if (formError) setFormError(null);
         }}
         className="space-y-6 glass rounded-xl p-6 border border-white/10"
@@ -1318,7 +1329,7 @@ export function PiProviderForm({
             selectedPresetId={selectedPresetId}
             presetEntries={presetEntries}
             presetCategoryLabels={presetCategoryLabels}
-            onPresetChange={selectPreset}
+            onPresetChange={trackChange(selectPreset)}
             category={category}
           />
         )}
@@ -1349,6 +1360,7 @@ export function PiProviderForm({
           >
             <BasicFormFields
               form={form}
+              onEdited={markDirty}
               beforeNameSlot={
                 isEdit || selectedPresetId === "custom" ? (
                   <div className="space-y-2">
@@ -1393,7 +1405,7 @@ export function PiProviderForm({
               })}
               htmlFor="pi-provider-api-select"
             >
-              <Select value={api} onValueChange={handleApiChange}>
+              <Select value={api} onValueChange={trackChange(handleApiChange)}>
                 <SelectTrigger id="pi-provider-api-select" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
@@ -1419,7 +1431,7 @@ export function PiProviderForm({
               id="pi-api-key"
               label={t("pi.form.credential")}
               value={apiKey}
-              onChange={handleApiKeyChange}
+              onChange={trackChange(handleApiKeyChange)}
               category={category}
               shouldShowLink={Boolean(selectedPreset?.apiKeyUrl)}
               websiteUrl={selectedPreset?.apiKeyUrl ?? ""}
@@ -1432,7 +1444,7 @@ export function PiProviderForm({
                 id="pi-provider-base-url"
                 label={t("opencode.baseUrl", { defaultValue: "Base URL" })}
                 value={baseUrl}
-                onChange={handleBaseUrlChange}
+                onChange={trackChange(handleBaseUrlChange)}
                 placeholder="https://api.example.com/v1"
               />
               <p className="text-xs text-muted-foreground">
@@ -1444,7 +1456,7 @@ export function PiProviderForm({
 
             <RequestHeadersEditor
               headers={providerHeaders}
-              onHeadersChange={handleProviderHeadersChange}
+              onHeadersChange={trackChange(handleProviderHeadersChange)}
             />
 
             <StructuredOptionsEditor
@@ -1459,7 +1471,7 @@ export function PiProviderForm({
               valuePlaceholder="false"
               removeLabel={t("pi.form.removeCompatibilityOption")}
               options={providerCompat}
-              onOptionsChange={handleProviderCompatChange}
+              onOptionsChange={trackChange(handleProviderCompatChange)}
             />
 
             <div
@@ -1991,7 +2003,7 @@ export function PiProviderForm({
                   id="pi-settings-config"
                   ariaLabel={t("provider.configJson")}
                   value={settingsConfigText}
-                  onChange={handleSettingsConfigChange}
+                  onChange={trackChange(handleSettingsConfigChange)}
                   height={
                     Math.max(1, settingsConfigText.split("\n").length) * 20 + 20
                   }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ProviderDraftGuard } from "./ProviderDraftGuard";
 import { FullScreenPanel } from "@/components/common/FullScreenPanel";
 import type { Provider } from "@/types";
 import {
@@ -18,6 +19,7 @@ import {
 } from "@/lib/api";
 import { extractCodexExperimentalBearerToken } from "@/utils/providerConfigUtils";
 import { getSharedChannelId } from "@/utils/sharedChannel";
+import { deepClone } from "@/utils/deepClone";
 
 interface EditProviderDialogProps {
   open: boolean;
@@ -90,16 +92,43 @@ const reconcileCodexLiveAuth = (
   };
 };
 
-export function EditProviderDialog({
+export function EditProviderDialog(props: EditProviderDialogProps) {
+  if (!props.open || !props.provider) return null;
+
+  return (
+    <EditProviderDialogSession
+      key={JSON.stringify([props.appId, props.provider.id])}
+      {...props}
+      provider={props.provider}
+    />
+  );
+}
+
+function EditProviderDialogSession({
   open,
-  provider,
+  provider: sourceProvider,
   onOpenChange,
   onSubmit,
   onManageSharedChannel,
   appId,
   isProxyTakeover = false,
-}: EditProviderDialogProps) {
+}: Omit<EditProviderDialogProps, "provider"> & { provider: Provider }) {
   const { t } = useTranslation();
+  // One immutable database snapshot belongs to this open/app/provider session.
+  const [provider] = useState(() => deepClone(sourceProvider));
+  const active = useRef(true);
+  const submitting = useRef(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const [pendingLeave, setPendingLeave] = useState<"close" | "shared" | null>(
+    null,
+  );
+  useEffect(() => {
+    active.current = true;
+    return () => {
+      active.current = false;
+    };
+  }, []);
   const [isFormSubmitting, setIsFormSubmitting] = useState(false);
   const [authSettingsTarget, setAuthSettingsTarget] =
     useState<ManagedAuthProvider | null>(null);
@@ -131,118 +160,79 @@ export function EditProviderDialog({
     [formReadyToken],
   );
 
-  // 默认使用传入的 provider.settingsConfig，若当前编辑对象是"当前生效供应商"，则尝试读取实时配置替换初始值
+  // Hydrate once before mounting the editable form. Never replace its draft
+  // with a late live response or a refreshed same-ID database row.
+  const skipLive =
+    isProxyTakeover ||
+    !!getSharedChannelId(provider, appId) ||
+    appId === "opencode" ||
+    appId === "pi";
   const [liveSettings, setLiveSettings] = useState<Record<
     string,
     unknown
   > | null>(null);
+  const [hasLoadedLive, setHasLoadedLive] = useState(skipLive);
+  const liveSettled = useRef(skipLive);
 
-  // 使用 ref 标记是否已经加载过，防止重复读取覆盖用户编辑
-  const [hasLoadedLive, setHasLoadedLive] = useState(false);
+  const useSavedSettings = useCallback(() => {
+    liveSettled.current = true;
+    setLiveSettings(null);
+    setHasLoadedLive(true);
+  }, []);
 
-  const closeDialog = useCallback(() => {
+  const finishClose = useCallback(() => {
     setAuthSettingsTarget(null);
     onOpenChange(false);
   }, [onOpenChange]);
 
+  const closeDialog = useCallback(() => {
+    if (submitting.current || pendingLeave) return;
+    if (isDirty) setPendingLeave("close");
+    else finishClose();
+  }, [finishClose, isFormSubmitting, isDirty, pendingLeave]);
+
   const handlePanelClose = useCallback(() => {
+    if (submitting.current) return;
     if (authSettingsTarget) {
       setAuthSettingsTarget(null);
       return;
     }
     closeDialog();
-  }, [authSettingsTarget, closeDialog]);
+  }, [authSettingsTarget, closeDialog, isFormSubmitting]);
 
   useEffect(() => {
+    if (liveSettled.current) return;
     let cancelled = false;
+    if (skipLive) {
+      useSavedSettings();
+      return;
+    }
     const load = async () => {
-      if (!open || !provider) {
-        setLiveSettings(null);
-        setHasLoadedLive(false);
-        return;
-      }
-
-      // 关键修复：只在首次打开时加载一次
-      if (hasLoadedLive) {
-        return;
-      }
-
-      // 代理接管模式：Live 配置已被代理改写，读取 live 会导致编辑界面展示代理地址/占位符等内容
-      // 因此直接回退到 SSOT（数据库）配置，避免用户困惑与误保存
-      // Linked providers are edited from their stored projection. Live Codex
-      // settings include derived bearer fields, which the shared channel owns.
-      if (isProxyTakeover || getSharedChannelId(provider, appId)) {
-        if (!cancelled) {
-          setLiveSettings(null);
-          setHasLoadedLive(true);
-        }
-        return;
-      }
-
-      // OpenCode uses additive mode, while Pi's shared models.json is owned by
-      // the catalog coordinator. Neither has a per-provider generic live
-      // snapshot that may replace the DB aggregate in this form.
-      if (appId === "opencode" || appId === "pi") {
-        if (!cancelled) {
-          setLiveSettings(null);
-          setHasLoadedLive(true);
-        }
-        return;
-      }
-
-      if (appId === "openclaw") {
-        try {
-          const live = await openclawApi.getLiveProvider(provider.id);
-          if (!cancelled && live && typeof live === "object") {
-            setLiveSettings(live);
-          } else if (!cancelled) {
-            setLiveSettings(null);
-          }
-        } catch {
-          if (!cancelled) {
-            setLiveSettings(null);
-          }
-        } finally {
-          if (!cancelled) {
-            setHasLoadedLive(true);
-          }
-        }
-        return;
-      }
-
+      let live: Record<string, unknown> | null = null;
       try {
-        const currentId = await providersApi.getCurrent(appId);
-        if (currentId && provider.id === currentId) {
-          try {
-            const live = (await vscodeApi.getLiveProviderSettings(
-              appId,
-            )) as Record<string, unknown>;
-            if (!cancelled && live && typeof live === "object") {
-              setLiveSettings(live);
-              setHasLoadedLive(true);
-            }
-          } catch {
-            // 读取实时配置失败则回退到 SSOT（不打断编辑流程）
-            if (!cancelled) {
-              setLiveSettings(null);
-              setHasLoadedLive(true);
-            }
-          }
+        if (appId === "openclaw") {
+          live = asRecord(await openclawApi.getLiveProvider(provider.id));
         } else {
-          if (!cancelled) {
-            setLiveSettings(null);
-            setHasLoadedLive(true);
+          const currentId = await providersApi.getCurrent(appId);
+          if (cancelled || liveSettled.current) return;
+          if (provider.id === currentId) {
+            live = asRecord(await vscodeApi.getLiveProviderSettings(appId));
           }
         }
-      } finally {
-        // no-op
+      } catch {
+        // Both current-provider lookup and live reads fall back to the stored
+        // snapshot, without exposing private IPC error details.
       }
+      if (cancelled || liveSettled.current) return;
+      liveSettled.current = true;
+      setLiveSettings(live ? deepClone(live) : null);
+      setHasLoadedLive(true);
     };
     void load();
     return () => {
       cancelled = true;
     };
-  }, [open, provider?.id, appId, hasLoadedLive, isProxyTakeover]); // 只依赖 provider.id，不依赖整个 provider 对象
+  }, [appId, provider.id, skipLive, useSavedSettings]);
 
   const initialSettingsConfig = useMemo(() => {
     const storedSettings = asRecord(provider?.settingsConfig);
@@ -274,12 +264,10 @@ export function EditProviderDialog({
     }
 
     return base;
-  }, [liveSettings, provider?.settingsConfig, provider?.category, appId]); // 只依赖表单初始化所需字段，不依赖整个 provider
+  }, [liveSettings, provider.settingsConfig, provider.category, appId]);
 
-  // 固定 initialData，防止 provider 对象更新时重置表单
-  const initialData = useMemo(() => {
-    if (!provider) return null;
-    return {
+  const initialData = useMemo(
+    () => ({
       name: provider.name,
       notes: provider.notes,
       websiteUrl: provider.websiteUrl,
@@ -288,17 +276,13 @@ export function EditProviderDialog({
       meta: provider.meta,
       icon: provider.icon,
       iconColor: provider.iconColor,
-    };
-  }, [
-    open, // 修复：编辑保存后再次打开显示旧数据，依赖 open 确保每次打开时重新读取最新 provider 数据
-    provider?.id, // 只依赖 ID，provider 对象更新不会触发重新计算
-    provider?.meta, // 供应商元数据变化时重新初始化表单
-    initialSettingsConfig,
-  ]);
+    }),
+    [provider, initialSettingsConfig],
+  );
 
   const handleSubmit = useCallback(
     async (values: ProviderFormValues) => {
-      if (!provider) return;
+      if (!hasLoadedLive || submitting.current) return;
 
       // 注意：values.settingsConfig 已经是最终的配置字符串
       // ProviderForm 已经为不同的 app 类型（Claude/Codex/Gemini）正确组装了配置
@@ -326,18 +310,21 @@ export function EditProviderDialog({
         ...(values.meta ? { meta: values.meta } : {}),
       };
 
-      await onSubmit({
-        provider: updatedProvider,
-        originalId: provider.id,
-      });
-      closeDialog();
+      submitting.current = true;
+      setIsSaving(true);
+      try {
+        await onSubmit({
+          provider: updatedProvider,
+          originalId: provider.id,
+        });
+        if (active.current) finishClose();
+      } finally {
+        submitting.current = false;
+        if (active.current) setIsSaving(false);
+      }
     },
-    [appId, onSubmit, closeDialog, provider],
+    [appId, onSubmit, finishClose, provider, hasLoadedLive],
   );
-
-  if (!provider || !initialData) {
-    return null;
-  }
 
   return (
     <FullScreenPanel
@@ -349,7 +336,9 @@ export function EditProviderDialog({
         <Button
           type="submit"
           form="provider-form"
-          disabled={isFormSubmitting || !isFormReady}
+          disabled={
+            !hasLoadedLive || isSaving || isFormSubmitting || !isFormReady
+          }
           className="bg-primary text-primary-foreground hover:bg-primary/90"
         >
           <Save className="h-4 w-4 mr-2" />
@@ -366,26 +355,52 @@ export function EditProviderDialog({
             <Button
               type="button"
               variant="outline"
-              disabled={isFormSubmitting}
-              onClick={() => onManageSharedChannel(provider)}
+              disabled={isSaving}
+              onClick={() => {
+                if (submitting.current || pendingLeave) return;
+                if (isDirty) setPendingLeave("shared");
+                else onManageSharedChannel(provider);
+              }}
             >
               {t("universalProvider.manageShared")}
             </Button>
           )}
         </div>
       )}
-      <ProviderForm
-        appId={appId}
-        providerId={provider.id}
-        submitLabel={t("common.save")}
-        onSubmit={handleSubmit}
-        onCancel={closeDialog}
-        onManageAuthAccounts={setAuthSettingsTarget}
-        onSubmittingChange={setIsFormSubmitting}
-        onSubmitReadyChange={handleSubmitReadyChange}
-        initialData={initialData}
-        showButtons={false}
-        isProxyTakeover={isProxyTakeover}
+      {!hasLoadedLive ? (
+        <div className="space-y-3" data-testid="provider-edit-loading">
+          <p className="text-sm text-muted-foreground" role="status">
+            {t("providerDraft.loading")}
+          </p>
+          <Button variant="outline" type="button" onClick={useSavedSettings}>
+            {t("providerDraft.useSaved")}
+          </Button>
+        </div>
+      ) : (
+        <ProviderForm
+          appId={appId}
+          providerId={provider.id}
+          submitLabel={t("common.save")}
+          onSubmit={handleSubmit}
+          onCancel={closeDialog}
+          onDirtyChange={setIsDirty}
+          onManageAuthAccounts={setAuthSettingsTarget}
+          onSubmittingChange={setIsFormSubmitting}
+          onSubmitReadyChange={handleSubmitReadyChange}
+          initialData={initialData}
+          showButtons={false}
+          isProxyTakeover={isProxyTakeover}
+        />
+      )}
+      <ProviderDraftGuard
+        open={pendingLeave !== null}
+        onKeep={() => setPendingLeave(null)}
+        onDiscard={() => {
+          const target = pendingLeave;
+          setPendingLeave(null);
+          if (target === "shared") onManageSharedChannel?.(provider);
+          else finishClose();
+        }}
       />
       <AuthSettingsPanel
         target={authSettingsTarget}

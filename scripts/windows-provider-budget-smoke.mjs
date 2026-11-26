@@ -162,6 +162,14 @@ export async function exerciseProviderBudgets(cdp, { check, until, label }) {
       input.scrollIntoView({block:'center'});
     })()`);
     await cdp.send("Input.insertText", { text: "3" });
+    const budgetInputState = await cdp.evaluate(`(() => {
+      const input=document.querySelector('[data-request-budget="recoveryTimeoutSecs"]');
+      return {value:input?.value,disabled:input?.matches(':disabled'),inert:!!input?.closest('[inert]'),active:document.activeElement?.id,inputs:document.querySelectorAll('[data-request-budget="recoveryTimeoutSecs"]').length,dialogs:[...document.querySelectorAll('[role="dialog"]')].map(item=>item.innerText)};
+    })()`);
+    process.stdout.write(`BUDGET_INPUT ${JSON.stringify(budgetInputState)}\n`);
+    await cdp.screenshot(
+      `${label.replaceAll(" ", "-")}-budget-input-probe.png`,
+    );
     await until(
       () =>
         cdp.evaluate(

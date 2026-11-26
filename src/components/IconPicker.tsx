@@ -34,7 +34,7 @@ export const IconPicker: React.FC<IconPickerProps> = ({
         </Label>
         <Input
           id="icon-search"
-          type="text"
+          type="search"
           placeholder={t("iconPicker.searchPlaceholder", {
             defaultValue: "输入图标名称...",
           })}

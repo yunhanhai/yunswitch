@@ -5,7 +5,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Provider } from "@/types";
 
@@ -35,13 +35,18 @@ vi.mock("@/components/common/FullScreenPanel", () => ({
     isOpen,
     children,
     footer,
+    onClose,
   }: {
     isOpen: boolean;
     children: React.ReactNode;
     footer?: React.ReactNode;
+    onClose: () => void;
   }) =>
     isOpen ? (
       <div>
+        <button type="button" onClick={onClose}>
+          panel-back
+        </button>
         <div>{children}</div>
         <div>{footer}</div>
       </div>
@@ -54,6 +59,7 @@ vi.mock("@/components/providers/forms/ProviderForm", () => ({
     onSubmit,
     onSubmitReadyChange,
     onManageAuthAccounts,
+    onDirtyChange,
     isProxyTakeover,
   }: {
     initialData: {
@@ -75,10 +81,16 @@ vi.mock("@/components/providers/forms/ProviderForm", () => ({
       iconColor?: string;
     }) => void;
     onSubmitReadyChange?: (isReady: boolean) => void;
+    onDirtyChange?: (dirty: boolean) => void;
     onManageAuthAccounts?: (target: "codex_oauth") => void;
     isProxyTakeover?: boolean;
     appId?: string;
   }) => {
+    const [draftName, setDraftName] = useState(initialData.name ?? "");
+    const [failed, setFailed] = useState(false);
+    useEffect(() => {
+      setDraftName(initialData.name ?? "");
+    }, [initialData]);
     useEffect(() => {
       if (onSubmitReadyChange) {
         submitReadyCallbacks.push(onSubmitReadyChange);
@@ -88,29 +100,42 @@ vi.mock("@/components/providers/forms/ProviderForm", () => ({
     return (
       <form
         id="provider-form"
-        onSubmit={(event) => {
+        onSubmit={async (event) => {
           event.preventDefault();
-          onSubmit({
-            name: initialData.name ?? "",
-            websiteUrl: initialData.websiteUrl ?? "",
-            notes: initialData.notes,
-            settingsConfig: JSON.stringify(initialData.settingsConfig ?? {}),
-            meta: mockCodexManagedAccountSelected
-              ? {
-                  ...(initialData.meta ?? {}),
-                  providerType: "codex_oauth",
-                  authBinding: {
-                    source: "managed_account",
-                    authProvider: "codex_oauth",
-                    accountId: "acct-managed",
-                  },
-                }
-              : initialData.meta,
-            icon: initialData.icon,
-            iconColor: initialData.iconColor,
-          });
+          try {
+            await onSubmit({
+              name: draftName,
+              websiteUrl: initialData.websiteUrl ?? "",
+              notes: initialData.notes,
+              settingsConfig: JSON.stringify(initialData.settingsConfig ?? {}),
+              meta: mockCodexManagedAccountSelected
+                ? {
+                    ...(initialData.meta ?? {}),
+                    providerType: "codex_oauth",
+                    authBinding: {
+                      source: "managed_account",
+                      authProvider: "codex_oauth",
+                      accountId: "acct-managed",
+                    },
+                  }
+                : initialData.meta,
+              icon: initialData.icon,
+              iconColor: initialData.iconColor,
+            });
+          } catch {
+            setFailed(true);
+          }
         }}
       >
+        <input
+          aria-label="draft-name"
+          value={draftName}
+          onChange={(event) => {
+            setDraftName(event.target.value);
+            onDirtyChange?.(true);
+          }}
+        />
+        {failed && <output>save-failed</output>}
         <output data-testid="settings-config">
           {JSON.stringify(initialData.settingsConfig ?? {})}
         </output>
@@ -238,6 +263,9 @@ describe("EditProviderDialog", () => {
       });
     });
 
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "common.save" })).toBeEnabled(),
+    );
     fireEvent.click(screen.getByRole("button", { name: "common.save" }));
 
     await waitFor(() => expect(handleSubmit).toHaveBeenCalledTimes(1));
@@ -299,6 +327,9 @@ describe("EditProviderDialog", () => {
       ).toEqual(expectedSettings);
     });
 
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "common.save" })).toBeEnabled(),
+    );
     fireEvent.click(screen.getByRole("button", { name: "common.save" }));
 
     await waitFor(() => expect(handleSubmit).toHaveBeenCalledTimes(1));
@@ -380,6 +411,9 @@ describe("EditProviderDialog", () => {
       JSON.parse(screen.getByTestId("settings-config").textContent ?? "{}"),
     ).toEqual(provider.settingsConfig);
 
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "common.save" })).toBeEnabled(),
+    );
     fireEvent.click(screen.getByRole("button", { name: "common.save" }));
 
     await waitFor(() => expect(handleSubmit).toHaveBeenCalledTimes(1));
@@ -446,7 +480,7 @@ describe("EditProviderDialog", () => {
     };
     const { rerender } = render(<EditProviderDialog open {...props} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "manage-auth" }));
+    fireEvent.click(await screen.findByRole("button", { name: "manage-auth" }));
     expect(screen.getByTestId("auth-settings-panel")).toHaveTextContent(
       "codex_oauth",
     );
@@ -481,6 +515,9 @@ describe("EditProviderDialog", () => {
       />,
     );
 
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "common.save" })).toBeEnabled(),
+    );
     fireEvent.click(screen.getByRole("button", { name: "common.save" }));
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
@@ -513,6 +550,9 @@ describe("EditProviderDialog", () => {
       />,
     );
 
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "common.save" })).toBeEnabled(),
+    );
     fireEvent.click(screen.getByRole("button", { name: "common.save" }));
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
@@ -557,6 +597,9 @@ describe("EditProviderDialog", () => {
       />,
     );
 
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "common.save" })).toBeEnabled(),
+    );
     fireEvent.click(screen.getByRole("button", { name: "common.save" }));
 
     await waitFor(() => expect(handleSubmit).toHaveBeenCalledTimes(1));
@@ -599,5 +642,380 @@ describe("EditProviderDialog", () => {
 
     act(() => staleCallback?.(true));
     expect(reopenedButton).toBeDisabled();
+  });
+  it("does not mount an editable draft until the current live snapshot settles", async () => {
+    const provider: Provider = {
+      id: "slow",
+      name: "Stored",
+      settingsConfig: { auth: { OPENAI_API_KEY: "fake-db" }, config: "stored" },
+    };
+    let finishLive!: (settings: Record<string, unknown>) => void;
+    apiMocks.getCurrent.mockResolvedValue(provider.id);
+    apiMocks.getLiveProviderSettings.mockReturnValue(
+      new Promise((resolve) => {
+        finishLive = resolve;
+      }),
+    );
+    render(
+      <EditProviderDialog
+        open
+        provider={provider}
+        appId="codex"
+        onSubmit={vi.fn()}
+        onOpenChange={vi.fn()}
+      />,
+    );
+    expect(
+      screen.queryByRole("textbox", { name: "draft-name" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "common.save" })).toBeDisabled();
+    await waitFor(() =>
+      expect(apiMocks.getLiveProviderSettings).toHaveBeenCalledOnce(),
+    );
+    await act(async () =>
+      finishLive({ auth: { OPENAI_API_KEY: "fake-live" }, config: "live" }),
+    );
+    expect(
+      await screen.findByRole("textbox", { name: "draft-name" }),
+    ).toHaveValue("Stored");
+    expect(
+      JSON.parse(screen.getByTestId("settings-config").textContent!),
+    ).toEqual({ auth: { OPENAI_API_KEY: "fake-live" }, config: "live" });
+  });
+
+  it("uses the saved snapshot on demand and ignores a later live response", async () => {
+    const provider: Provider = {
+      id: "slow",
+      name: "Stored",
+      settingsConfig: { auth: { OPENAI_API_KEY: "fake-db" }, config: "stored" },
+    };
+    let finishLive!: (settings: Record<string, unknown>) => void;
+    apiMocks.getCurrent.mockResolvedValue(provider.id);
+    apiMocks.getLiveProviderSettings.mockReturnValue(
+      new Promise((resolve) => {
+        finishLive = resolve;
+      }),
+    );
+    render(
+      <EditProviderDialog
+        open
+        provider={provider}
+        appId="codex"
+        onSubmit={vi.fn()}
+        onOpenChange={vi.fn()}
+      />,
+    );
+    await waitFor(() =>
+      expect(apiMocks.getLiveProviderSettings).toHaveBeenCalledOnce(),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "providerDraft.useSaved" }),
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "draft-name" }), {
+      target: { value: "Keep draft" },
+    });
+    await act(async () =>
+      finishLive({ auth: { OPENAI_API_KEY: "fake-late" }, config: "late" }),
+    );
+    expect(screen.getByRole("textbox", { name: "draft-name" })).toHaveValue(
+      "Keep draft",
+    );
+    expect(
+      JSON.parse(screen.getByTestId("settings-config").textContent!),
+    ).toEqual(provider.settingsConfig);
+  });
+
+  it.each(["current", "live"])(
+    "falls back to saved data when %s lookup fails",
+    async (failure) => {
+      const provider: Provider = {
+        id: "fallback",
+        name: "Fallback",
+        settingsConfig: { env: { ANTHROPIC_AUTH_TOKEN: "fake" } },
+      };
+      apiMocks.getCurrent.mockImplementation(() =>
+        failure === "current"
+          ? Promise.reject(new Error("private error"))
+          : Promise.resolve(provider.id),
+      );
+      apiMocks.getLiveProviderSettings.mockRejectedValue(
+        new Error("private error"),
+      );
+      render(
+        <EditProviderDialog
+          open
+          provider={provider}
+          appId="claude"
+          onSubmit={vi.fn()}
+          onOpenChange={vi.fn()}
+        />,
+      );
+      expect(
+        await screen.findByRole("textbox", { name: "draft-name" }),
+      ).toHaveValue("Fallback");
+      expect(
+        JSON.parse(screen.getByTestId("settings-config").textContent!),
+      ).toEqual(provider.settingsConfig);
+      expect(screen.queryByText("private error")).not.toBeInTheDocument();
+    },
+  );
+
+  it("freezes the whole same-ID snapshot during edits and reloads only after reopening", async () => {
+    const provider: Provider = {
+      id: "stable",
+      name: "Original",
+      settingsConfig: { config: "original" },
+      meta: { requestBudget: { firstByteTimeoutSecs: 30 } },
+    };
+    const props = {
+      appId: "codex" as const,
+      isProxyTakeover: true,
+      onSubmit: vi.fn(),
+      onOpenChange: vi.fn(),
+    };
+    const { rerender } = render(
+      <EditProviderDialog open provider={provider} {...props} />,
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "draft-name" }), {
+      target: { value: "User draft" },
+    });
+    const refreshed: Provider = {
+      ...provider,
+      name: "Refreshed",
+      settingsConfig: { config: "refreshed" },
+      meta: { requestBudget: { firstByteTimeoutSecs: 60 } },
+    };
+    rerender(<EditProviderDialog open provider={refreshed} {...props} />);
+    expect(screen.getByRole("textbox", { name: "draft-name" })).toHaveValue(
+      "User draft",
+    );
+    expect(
+      JSON.parse(screen.getByTestId("settings-config").textContent!),
+    ).toEqual(provider.settingsConfig);
+    rerender(
+      <EditProviderDialog open={false} provider={refreshed} {...props} />,
+    );
+    rerender(<EditProviderDialog open provider={refreshed} {...props} />);
+    expect(screen.getByRole("textbox", { name: "draft-name" })).toHaveValue(
+      "Refreshed",
+    );
+    expect(
+      JSON.parse(screen.getByTestId("settings-config").textContent!),
+    ).toEqual(refreshed.settingsConfig);
+  });
+
+  it("isolates a provider change while the old live read is still pending", async () => {
+    const a: Provider = {
+      id: "a",
+      name: "A",
+      settingsConfig: { config: "db-a" },
+    };
+    const b: Provider = {
+      id: "b",
+      name: "B",
+      settingsConfig: { config: "db-b" },
+    };
+    let finishA!: (settings: Record<string, unknown>) => void;
+    apiMocks.getCurrent.mockResolvedValueOnce("a").mockResolvedValueOnce("b");
+    apiMocks.getLiveProviderSettings
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          finishA = resolve;
+        }),
+      )
+      .mockResolvedValueOnce({ config: "live-b" });
+    const props = {
+      appId: "codex" as const,
+      onSubmit: vi.fn(),
+      onOpenChange: vi.fn(),
+    };
+    const { rerender } = render(
+      <EditProviderDialog open provider={a} {...props} />,
+    );
+    await waitFor(() =>
+      expect(apiMocks.getLiveProviderSettings).toHaveBeenCalledOnce(),
+    );
+    rerender(<EditProviderDialog open provider={b} {...props} />);
+    expect(
+      await screen.findByRole("textbox", { name: "draft-name" }),
+    ).toHaveValue("B");
+    await act(async () => finishA({ config: "live-a" }));
+    expect(
+      JSON.parse(screen.getByTestId("settings-config").textContent!),
+    ).toEqual({ config: "live-b" });
+  });
+
+  it("loads a separate snapshot when two apps use the same provider ID", async () => {
+    const provider: Provider = {
+      id: "shared-id",
+      name: "Codex",
+      settingsConfig: { config: "db" },
+    };
+    apiMocks.getCurrent.mockResolvedValue(provider.id);
+    apiMocks.getLiveProviderSettings
+      .mockResolvedValueOnce({ config: "codex-live" })
+      .mockResolvedValueOnce({ env: { ANTHROPIC_AUTH_TOKEN: "fake-claude" } });
+    const props = { onSubmit: vi.fn(), onOpenChange: vi.fn() };
+    const { rerender } = render(
+      <EditProviderDialog open provider={provider} appId="codex" {...props} />,
+    );
+    await screen.findByRole("textbox", { name: "draft-name" });
+    rerender(
+      <EditProviderDialog
+        open
+        provider={{ ...provider, name: "Claude" }}
+        appId="claude"
+        {...props}
+      />,
+    );
+    expect(
+      await screen.findByRole("textbox", { name: "draft-name" }),
+    ).toHaveValue("Claude");
+    expect(
+      JSON.parse(screen.getByTestId("settings-config").textContent!),
+    ).toEqual({ env: { ANTHROPIC_AUTH_TOKEN: "fake-claude" } });
+    expect(apiMocks.getCurrent.mock.calls.map(([app]) => app)).toEqual([
+      "codex",
+      "claude",
+    ]);
+  });
+
+  it("ignores late success from a closed session instead of closing a reopened editor", async () => {
+    const provider: Provider = {
+      id: "saving",
+      name: "Saved",
+      settingsConfig: {},
+    };
+    let finish!: () => void;
+    const onSubmit = vi.fn().mockReturnValue(
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const onOpenChange = vi.fn();
+    const props = {
+      provider,
+      appId: "codex" as const,
+      isProxyTakeover: true,
+      onSubmit,
+      onOpenChange,
+    };
+    const { rerender } = render(<EditProviderDialog open {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+    fireEvent.click(screen.getByRole("button", { name: "panel-back" }));
+    expect(onOpenChange).not.toHaveBeenCalled();
+    rerender(<EditProviderDialog open={false} {...props} />);
+    rerender(<EditProviderDialog open {...props} />);
+    await act(async () => finish());
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("textbox", { name: "draft-name" }),
+    ).toBeInTheDocument();
+  });
+  it("retains the draft after a failed save and permits retry", async () => {
+    const provider: Provider = {
+      id: "retry-save",
+      name: "Original",
+      settingsConfig: { config: "stored" },
+    };
+    const onSubmit = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("private-save-error"))
+      .mockResolvedValueOnce(undefined);
+    const onOpenChange = vi.fn();
+    render(
+      <EditProviderDialog
+        open
+        provider={provider}
+        appId="codex"
+        isProxyTakeover
+        onSubmit={onSubmit}
+        onOpenChange={onOpenChange}
+      />,
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "draft-name" }), {
+      target: { value: "Keep failed draft" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+    await screen.findByText("save-failed");
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "draft-name" })).toHaveValue(
+      "Keep failed draft",
+    );
+    expect(screen.queryByText("private-save-error")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+    expect(onSubmit.mock.calls[1][0].provider.name).toBe("Keep failed draft");
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+  });
+
+  it("uses a per-provider OpenClaw snapshot before mounting its editor", async () => {
+    const provider: Provider = {
+      id: "openclaw-provider",
+      name: "Claw",
+      settingsConfig: { baseUrl: "https://stored.example" },
+    };
+    apiMocks.getOpenClawLiveProvider.mockResolvedValue({
+      baseUrl: "https://live.example",
+      apiKey: "fake-claw",
+    });
+    render(
+      <EditProviderDialog
+        open
+        provider={provider}
+        appId="openclaw"
+        onSubmit={vi.fn()}
+        onOpenChange={vi.fn()}
+      />,
+    );
+    await screen.findByRole("textbox", { name: "draft-name" });
+    expect(apiMocks.getOpenClawLiveProvider).toHaveBeenCalledWith(provider.id);
+    expect(apiMocks.getCurrent).not.toHaveBeenCalled();
+    expect(
+      JSON.parse(screen.getByTestId("settings-config").textContent!),
+    ).toEqual({ baseUrl: "https://live.example", apiKey: "fake-claw" });
+  });
+});
+
+describe("EditProviderDialog draft navigation", () => {
+  it("keeps changed linked settings until shared-channel navigation is explicitly confirmed", async () => {
+    const close = vi.fn();
+    const manage = vi.fn();
+    const provider: Provider = {
+      id: "linked-draft",
+      name: "Stored",
+      settingsConfig: { auth: { OPENAI_API_KEY: "fake-key" }, config: "" },
+      meta: { sharedChannelId: "channel" },
+    };
+    render(
+      <EditProviderDialog
+        open
+        provider={provider}
+        appId="codex"
+        onOpenChange={close}
+        onSubmit={vi.fn()}
+        onManageSharedChannel={manage}
+      />,
+    );
+    fireEvent.change(await screen.findByLabelText("draft-name"), {
+      target: { value: "unsaved name" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "universalProvider.manageShared" }),
+    );
+    expect(manage).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "providerDraft.keep" }));
+    expect(screen.getByLabelText("draft-name")).toHaveValue("unsaved name");
+    fireEvent.click(screen.getByRole("button", { name: "panel-back" }));
+    expect(close).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "providerDraft.keep" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "universalProvider.manageShared" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "providerDraft.discard" }),
+    );
+    expect(manage).toHaveBeenCalledOnce();
+    expect(close).not.toHaveBeenCalled();
   });
 });

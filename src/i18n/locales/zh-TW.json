@@ -1,4 +1,13 @@
 {
+  "providerDraft": {
+    "discardTitle": "捨棄尚未儲存的修改？",
+    "discardMessage": "本次填寫的內容尚未儲存。選擇「繼續編輯」可保留目前內容；捨棄後需要重新填寫。草稿僅保留於目前視窗。",
+    "discard": "捨棄修改",
+    "keep": "繼續編輯",
+    "loading": "正在讀取目前設定…",
+    "useSaved": "使用已儲存設定繼續",
+    "saveFailed": "儲存未完成，填寫內容已保留，請檢查後重試。"
+  },
   "app": {
     "title": "YunSwitch",
     "description": "AI 程式開發工具設定與路由管理"

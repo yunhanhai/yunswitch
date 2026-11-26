@@ -104,6 +104,7 @@ export function ModelCatalogPicker({
         </div>
       </div>
       <Input
+        type="search"
         placeholder={t("provider.modelCatalog.filterPlaceholder", {
           defaultValue: "筛选模型...",
         })}
@@ -449,6 +450,7 @@ export function ModelCatalogPanel({
       ) : null}
       <div className="flex items-center gap-2">
         <Input
+          type="search"
           placeholder={t("provider.modelCatalog.filterPlaceholder", {
             defaultValue: "筛选模型...",
           })}
@@ -459,6 +461,7 @@ export function ModelCatalogPanel({
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <input
             type="checkbox"
+            data-draft-ignore
             checked={showVendorOnly}
             onChange={(e) => setShowVendorOnly(e.target.checked)}
           />

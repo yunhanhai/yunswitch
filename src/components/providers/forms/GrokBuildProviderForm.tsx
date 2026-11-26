@@ -1,3 +1,4 @@
+import { useProviderDraftChange } from "./hooks/useProviderDraftChange";
 import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -79,10 +80,13 @@ export function GrokBuildProviderForm({
   onSubmit,
   onCancel,
   onSubmittingChange,
+  onDirtyChange,
   initialData,
   showButtons = true,
 }: GrokBuildProviderFormProps) {
   const { t } = useTranslation();
+  const { markDirty, trackChange, onFieldChange } =
+    useProviderDraftChange(onDirtyChange);
   const [requestBudget, setRequestBudget] = useState(() =>
     requestBudgetDraft(initialData?.meta?.requestBudget),
   );
@@ -438,6 +442,8 @@ export function GrokBuildProviderForm({
     <Form {...form}>
       <form
         id="provider-form"
+        onChange={onFieldChange}
+        onInput={onFieldChange}
         onSubmit={form.handleSubmit(handleSubmit)}
         className="space-y-6 glass rounded-xl p-6 border border-white/10"
       >
@@ -446,12 +452,12 @@ export function GrokBuildProviderForm({
             selectedPresetId={selectedPresetId}
             presetEntries={grokPresetEntries}
             presetCategoryLabels={presetCategoryLabels}
-            onPresetChange={handlePresetChange}
+            onPresetChange={trackChange(handlePresetChange)}
             category={category}
           />
         )}
 
-        <BasicFormFields form={form} />
+        <BasicFormFields form={form} onEdited={markDirty} />
 
         {category !== "official" && (
           <>
@@ -460,6 +466,7 @@ export function GrokBuildProviderForm({
               providerId={providerId}
               codexApiKey={apiKey}
               onApiKeyChange={(value) => {
+                markDirty();
                 setApiKey(value);
                 syncStructuredConfig({ apiKey: value });
               }}
@@ -471,42 +478,49 @@ export function GrokBuildProviderForm({
               shouldShowSpeedTest
               codexBaseUrl={baseUrl}
               onBaseUrlChange={(value) => {
+                markDirty();
                 setBaseUrl(value);
                 syncStructuredConfig({ baseUrl: value });
               }}
               isFullUrl={isFullUrl}
-              onFullUrlChange={setIsFullUrl}
+              onFullUrlChange={trackChange(setIsFullUrl)}
               isEndpointModalOpen={isEndpointModalOpen}
               onEndpointModalToggle={setIsEndpointModalOpen}
-              onCustomEndpointsChange={setDraftCustomEndpoints}
+              onCustomEndpointsChange={trackChange(setDraftCustomEndpoints)}
               autoSelect={endpointAutoSelect}
-              onAutoSelectChange={setEndpointAutoSelect}
+              onAutoSelectChange={trackChange(setEndpointAutoSelect)}
               codexModel={upstreamModel}
               onModelChange={(value) => {
+                markDirty();
                 setUpstreamModel(value);
                 syncStructuredConfig({ upstreamModel: value });
               }}
               apiFormat={apiFormat}
               onApiFormatChange={(value) => {
+                markDirty();
                 setApiFormat(value);
               }}
               anthropicAuthField={anthropicAuthField}
-              onAnthropicAuthFieldChange={setAnthropicAuthField}
+              onAnthropicAuthFieldChange={trackChange(setAnthropicAuthField)}
               impersonateClaudeCode={impersonateClaudeCode}
-              onImpersonateClaudeCodeChange={setImpersonateClaudeCode}
+              onImpersonateClaudeCodeChange={trackChange(
+                setImpersonateClaudeCode,
+              )}
               maxOutputTokens={maxOutputTokens}
-              onMaxOutputTokensChange={setMaxOutputTokens}
+              onMaxOutputTokensChange={trackChange(setMaxOutputTokens)}
               codexChatReasoning={codexChatReasoning}
-              onCodexChatReasoningChange={setCodexChatReasoning}
+              onCodexChatReasoningChange={trackChange(setCodexChatReasoning)}
               promptCacheRouting={promptCacheRouting}
-              onPromptCacheRoutingChange={setPromptCacheRouting}
+              onPromptCacheRoutingChange={trackChange(setPromptCacheRouting)}
               speedTestEndpoints={speedTestEndpoints}
               customUserAgent={customUserAgent}
-              onCustomUserAgentChange={setCustomUserAgent}
+              onCustomUserAgentChange={trackChange(setCustomUserAgent)}
               localProxyHeadersOverride={headersOverride}
-              onLocalProxyHeadersOverrideChange={setHeadersOverride}
+              onLocalProxyHeadersOverrideChange={trackChange(
+                setHeadersOverride,
+              )}
               localProxyBodyOverride={bodyOverride}
-              onLocalProxyBodyOverrideChange={setBodyOverride}
+              onLocalProxyBodyOverrideChange={trackChange(setBodyOverride)}
             />
 
             <FormItem>
@@ -536,7 +550,7 @@ export function GrokBuildProviderForm({
               </FormLabel>
               <JsonEditor
                 value={rawConfig}
-                onChange={handleRawConfigChange}
+                onChange={trackChange(handleRawConfigChange)}
                 placeholder=""
                 darkMode={isDarkMode}
                 rows={3}
@@ -570,7 +584,7 @@ export function GrokBuildProviderForm({
 
         <ProviderRequestBudgetFields
           value={requestBudget}
-          onChange={setRequestBudget}
+          onChange={trackChange(setRequestBudget)}
         />
 
         {showButtons && (

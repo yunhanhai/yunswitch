@@ -93,15 +93,16 @@ vi.mock("@/components/providers/EditProviderDialog", () => ({
     open ? (
       <div data-testid="edit-provider-dialog">
         <button
-          onClick={() =>
-            onSubmit({
+          onClick={async () => {
+            await onSubmit({
               provider: {
                 ...provider,
                 name: `${provider.name}-edited`,
               },
               originalId: provider.id,
-            })
-          }
+            });
+            onOpenChange(false);
+          }}
         >
           confirm-edit
         </button>

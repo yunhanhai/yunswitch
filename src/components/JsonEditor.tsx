@@ -3,13 +3,16 @@ import { EditorView, basicSetup } from "codemirror";
 import { json } from "@codemirror/lang-json";
 import { javascript } from "@codemirror/lang-javascript";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { EditorSelection, EditorState } from "@codemirror/state";
+import { Annotation, EditorSelection, EditorState } from "@codemirror/state";
+
 import { placeholder } from "@codemirror/view";
 import { linter, Diagnostic } from "@codemirror/lint";
 import { useTranslation } from "react-i18next";
 import { Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { formatJSON } from "@/utils/formatters";
+
+const externalValueUpdate = Annotation.define<boolean>();
 
 interface JsonEditorProps {
   id?: string;
@@ -209,7 +212,15 @@ const JsonEditor: React.FC<JsonEditorProps> = ({
         ariaLabel ? { "aria-label": ariaLabel } : {},
       ),
       EditorView.updateListener.of((update) => {
-        if (!readOnly && update.docChanged) {
+        if (
+          !readOnly &&
+          update.docChanged &&
+          update.transactions.some(
+            (transaction) =>
+              transaction.docChanged &&
+              !transaction.annotation(externalValueUpdate),
+          )
+        ) {
           const newValue = update.state.doc.toString();
           onChangeRef.current(newValue);
         }
@@ -309,6 +320,7 @@ const JsonEditor: React.FC<JsonEditorProps> = ({
         },
       );
       const transaction = viewRef.current.state.update({
+        annotations: externalValueUpdate.of(true),
         // Preserve the unchanged prefix and suffix so CodeMirror can map the
         // current selection through automatic JSON normalization.
         changes,
