@@ -425,10 +425,10 @@ impl ProviderService {
             )?;
             let old_child_format = existing
                 .filter(|existing| {
-                    !existing
+                    existing
                         .meta
                         .as_ref()
-                        .is_some_and(|meta| meta.shared_channel_id.is_some())
+                        .is_none_or(|meta| meta.shared_channel_id.is_none())
                 })
                 .and_then(|existing| {
                     existing
@@ -1935,6 +1935,124 @@ model_providers = {custom = {base_url = 'https://old.example', request_max_retri
                     assert!(actual["model_providers"]["custom"]["http_headers"]
                         .get("Authorization")
                         .is_none());
+                }
+            }
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn shared_channel_legacy_common_config_migration_retains_connection_and_editability() {
+        with_shared_test_home(|state, _| {
+            let channel = channel();
+            ProviderService::save_shared_channel(state, channel.clone()).unwrap();
+            use crate::proxy::providers::{ClaudeAdapter, CodexAdapter, ProviderAdapter};
+            for legacy_binding in [false, true] {
+                for app in [AppType::Claude, AppType::Codex] {
+                    let mut provider = child(&channel, &app).unwrap();
+                    if legacy_binding {
+                        provider.meta.as_mut().unwrap().shared_channel_id = None;
+                    }
+                    let snippet = if app == AppType::Claude {
+                        provider.settings_config["env"]["SYNTHETIC_COMMON_PREF"] =
+                            serde_json::json!("inherited");
+                        provider.settings_config["env"]["SYNTHETIC_LOCAL_PREF"] =
+                            serde_json::json!("keep");
+                        serde_json::json!({"env": {
+                            "ANTHROPIC_AUTH_TOKEN": "sk-fake-before",
+                            "ANTHROPIC_BASE_URL": "https://synthetic.example",
+                            "SYNTHETIC_COMMON_PREF": "inherited"
+                        }})
+                        .to_string()
+                    } else {
+                        let mut document = codex_document(&provider).unwrap();
+                        document["approval_policy"] = toml_edit::value("never");
+                        document["sandbox_mode"] = toml_edit::value("workspace-write");
+                        provider.settings_config["config"] =
+                            serde_json::json!(document.to_string());
+                        "approval_policy = 'never'\nmodel_provider = 'custom'\n[model_providers.custom]\nbase_url = 'https://synthetic.example/v1'\nwire_api = 'responses'\nrequires_openai_auth = true\n".into()
+                    };
+                    state.db.save_provider(app.as_str(), &provider).unwrap();
+                    state
+                        .db
+                        .set_config_snippet(app.as_str(), Some(snippet.clone()))
+                        .unwrap();
+                    ProviderService::migrate_legacy_common_config_usage(
+                        state,
+                        app.clone(),
+                        &snippet,
+                    )
+                    .unwrap();
+                    let migrated = state
+                        .db
+                        .get_provider_by_id(&provider.id, app.as_str())
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(
+                        migrated.meta.as_ref().unwrap().common_config_enabled,
+                        Some(true)
+                    );
+                    if app == AppType::Claude {
+                        assert_eq!(
+                            ClaudeAdapter::new()
+                                .extract_auth(&migrated)
+                                .unwrap()
+                                .api_key,
+                            "sk-fake-before"
+                        );
+                        assert_eq!(
+                            ClaudeAdapter::new().extract_base_url(&migrated).unwrap(),
+                            "https://synthetic.example"
+                        );
+                        assert!(migrated.settings_config["env"]
+                            .get("SYNTHETIC_COMMON_PREF")
+                            .is_none());
+                        assert_eq!(
+                            migrated.settings_config["env"]["SYNTHETIC_LOCAL_PREF"],
+                            "keep"
+                        );
+                    } else {
+                        assert_eq!(
+                            CodexAdapter::new().extract_auth(&migrated).unwrap().api_key,
+                            "sk-fake-before"
+                        );
+                        assert_eq!(
+                            CodexAdapter::new().extract_base_url(&migrated).unwrap(),
+                            "https://synthetic.example/v1"
+                        );
+                        let document = codex_document(&migrated).unwrap();
+                        assert_eq!(document["model_provider"].as_str(), Some("custom"));
+                        assert_eq!(
+                            document["model_providers"]["custom"]["wire_api"].as_str(),
+                            Some("responses")
+                        );
+                        assert!(document.get("approval_policy").is_none());
+                        assert_eq!(document["sandbox_mode"].as_str(), Some("workspace-write"));
+                    }
+                    let effective = live::build_effective_settings_with_common_config(
+                        &state.db, &app, &migrated,
+                    )
+                    .unwrap();
+                    if app == AppType::Claude {
+                        assert_eq!(effective["env"]["SYNTHETIC_COMMON_PREF"], "inherited");
+                    } else {
+                        let document: toml_edit::DocumentMut =
+                            effective["config"].as_str().unwrap().parse().unwrap();
+                        assert_eq!(document["approval_policy"].as_str(), Some("never"));
+                    }
+                    let mut edited = migrated;
+                    edited.notes = Some("After legacy migration".into());
+                    ProviderService::update(state, app.clone(), None, edited).unwrap();
+                    let saved = state
+                        .db
+                        .get_provider_by_id(&provider.id, app.as_str())
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(saved.notes.as_deref(), Some("After legacy migration"));
+                    assert_eq!(
+                        saved.meta.unwrap().shared_channel_id.as_deref(),
+                        Some("test-channel")
+                    );
                 }
             }
         });

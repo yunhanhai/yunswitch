@@ -5591,7 +5591,15 @@ impl ProviderService {
                 &updated_provider.settings_config,
                 legacy_snippet,
             ) {
-                Ok(settings) => updated_provider.settings_config = settings,
+                Ok(mut settings) => {
+                    shared_channel::reapply_shared_settings(
+                        state.db.as_ref(),
+                        &app_type,
+                        provider,
+                        &mut settings,
+                    )?;
+                    updated_provider.settings_config = settings;
+                }
                 Err(err) => {
                     log::warn!(
                         "Failed to normalize legacy common config for {} provider '{}': {err}",
