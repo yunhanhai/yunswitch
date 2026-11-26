@@ -73,6 +73,36 @@ beforeEach(() => {
 });
 
 describe("shared channel form", () => {
+  it("preserves original child IDs and authentication transport while rotating a linked key", async () => {
+    const linked = channel();
+    linked.childIds = { claude: "old-claude", codex: "old-codex" };
+    linked.connections = {
+      claude: { apiKeyField: "ANTHROPIC_API_KEY", apiFormat: "anthropic" },
+    };
+    const onSave = vi.fn().mockResolvedValue(complete);
+    render(
+      <UniversalProviderFormModal
+        isOpen
+        onClose={vi.fn()}
+        onSave={onSave}
+        editingProvider={linked}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("共享 API Key"), {
+      target: { value: "synthetic-rotated-key" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存并同步" }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
+    expect(onSave.mock.calls[0][0]).toMatchObject({
+      childIds: linked.childIds,
+      connections: linked.connections,
+      apiKey: "synthetic-rotated-key",
+    });
+    expect(
+      screen.getAllByText(zh.universalProvider.link.disableHint),
+    ).toHaveLength(2);
+  });
+
   it("shows a legacy upstream protocol and allows changing it to the native protocol", async () => {
     const legacy = channel();
     legacy.meta = { apiFormat: "openai_chat" };
@@ -188,14 +218,12 @@ describe("shared channel form", () => {
   });
 
   it("retains the same ID for a saved channel whose live sync needs retry", async () => {
-    const save = vi
-      .fn()
-      .mockResolvedValueOnce({
-        saved: true,
-        syncedApps: ["claude"],
-        failedApps: ["codex"],
-      })
-      .mockResolvedValueOnce(complete);
+    const save = vi.fn().mockResolvedValueOnce({
+      saved: true,
+      syncedApps: ["claude"],
+      failedApps: ["codex"],
+    });
+    vi.mocked(universalProvidersApi.resync).mockResolvedValue(complete);
     const close = vi.fn();
     render(<UniversalProviderFormModal isOpen onClose={close} onSave={save} />);
     fireEvent.change(screen.getByLabelText("共享 API 地址"), {
@@ -209,9 +237,15 @@ describe("shared channel form", () => {
       expect(screen.getByRole("status")).toHaveTextContent("Codex"),
     );
     expect(close).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "保存并同步" }));
+    expect(screen.getByLabelText("共享 API Key")).toBeDisabled();
+    fireEvent.click(
+      screen.getByRole("button", { name: zh.universalProvider.link.resync }),
+    );
     await waitFor(() => expect(close).toHaveBeenCalledOnce());
-    expect(save.mock.calls[0][0].id).toBe(save.mock.calls[1][0].id);
+    expect(save).toHaveBeenCalledOnce();
+    expect(universalProvidersApi.resync).toHaveBeenCalledWith(
+      save.mock.calls[0][0].id,
+    );
   });
 
   it("does not replace an open draft when the saved provider list refreshes", () => {
@@ -233,6 +267,39 @@ describe("shared channel form", () => {
       />,
     );
     expect(screen.getByLabelText("名称")).toHaveValue("Unsaved draft");
+  });
+
+  it("resyncs the saved channel after detach changes its binding map", async () => {
+    const linked = {
+      ...channel(),
+      childIds: { claude: "existing-claude", codex: "existing-codex" },
+    };
+    const save = vi
+      .fn()
+      .mockResolvedValue({
+        saved: true,
+        syncedApps: [],
+        failedApps: ["codex"],
+      });
+    vi.mocked(universalProvidersApi.resync).mockResolvedValue(complete);
+    const close = vi.fn();
+    render(
+      <UniversalProviderFormModal
+        isOpen
+        onClose={close}
+        onSave={save}
+        editingProvider={linked}
+      />,
+    );
+    fireEvent.click(screen.getByRole("switch", { name: "Claude Code" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存并同步" }));
+    await screen.findByRole("status");
+    fireEvent.click(
+      screen.getByRole("button", { name: zh.universalProvider.link.resync }),
+    );
+    await waitFor(() => expect(close).toHaveBeenCalledOnce());
+    expect(save).toHaveBeenCalledOnce();
+    expect(universalProvidersApi.resync).toHaveBeenCalledWith(linked.id);
   });
 
   it("previews only a backend-generated masked configuration and invalidates stale preview", async () => {
@@ -312,6 +379,31 @@ describe("shared channel form", () => {
 });
 
 describe("shared channel panel", () => {
+  it("duplicates a linked channel without claiming its original provider IDs", async () => {
+    const original = {
+      ...channel(),
+      childIds: { claude: "original-claude", codex: "original-codex" },
+    };
+    vi.mocked(universalProvidersApi.getAll).mockResolvedValue({
+      [original.id]: original,
+    });
+    render(<UniversalProviderPanel />);
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: zh.universalProvider.duplicate,
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "保存并同步" }));
+    await waitFor(() => expect(universalProvidersApi.save).toHaveBeenCalled());
+    const saved = vi.mocked(universalProvidersApi.save).mock.calls[0][0];
+    expect(saved.childIds).toBeUndefined();
+    expect(saved.id).not.toBe(original.id);
+    expect(original.childIds).toEqual({
+      claude: "original-claude",
+      codex: "original-codex",
+    });
+  });
+
   it("retries by ID without sending a stale credential snapshot", async () => {
     const original = channel();
     vi.mocked(universalProvidersApi.getAll).mockResolvedValue({

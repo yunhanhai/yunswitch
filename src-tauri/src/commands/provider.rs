@@ -941,6 +941,56 @@ pub async fn resync_shared_channel(
 }
 
 #[tauri::command]
+pub async fn list_shared_channel_link_candidates(
+    app: AppHandle,
+) -> Result<crate::services::provider::SharedChannelLinkCandidates, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app
+            .try_state::<AppState>()
+            .ok_or_else(|| "Application state unavailable".to_string())?;
+        ProviderService::list_shared_channel_link_candidates(state.inner())
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|_| "Shared channel candidate task failed".to_string())?
+}
+
+#[tauri::command]
+pub async fn preview_shared_channel_link(
+    app: AppHandle,
+    request: crate::services::provider::SharedChannelLinkRequest,
+) -> Result<crate::services::provider::SharedChannelLinkPreview, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app
+            .try_state::<AppState>()
+            .ok_or_else(|| "Application state unavailable".to_string())?;
+        ProviderService::preview_shared_channel_link(state.inner(), request)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|_| "Shared channel link preview task failed".to_string())?
+}
+
+#[tauri::command]
+pub async fn link_existing_shared_channel(
+    app: AppHandle,
+    request: crate::services::provider::SharedChannelLinkRequest,
+    token: String,
+) -> Result<crate::services::provider::SharedChannelLinkResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app
+            .try_state::<AppState>()
+            .ok_or_else(|| "Application state unavailable".to_string())?;
+        let result = ProviderService::link_existing_shared_channel(state.inner(), request, token)
+            .map_err(|error| error.to_string())?;
+        emit_universal_provider_synced(&app, "link", &result.channel_id);
+        Ok(result)
+    })
+    .await
+    .map_err(|_| "Shared channel link task failed".to_string())?
+}
+
+#[tauri::command]
 pub fn preview_shared_channel(
     provider: UniversalProvider,
 ) -> Result<HashMap<String, Provider>, String> {

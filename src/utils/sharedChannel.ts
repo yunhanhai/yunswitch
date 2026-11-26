@@ -8,10 +8,13 @@ export function getSharedChannelId(
 ): string | undefined {
   if (!["claude", "codex", "gemini"].includes(appId)) return undefined;
   const prefix = `universal-${appId}-`;
-  if (!provider.id.startsWith(prefix)) return undefined;
+  const declared = provider.meta?.sharedChannelId;
+  if (!provider.id.startsWith(prefix)) {
+    // This is a display hint; the backend validates both sides of the binding.
+    return declared?.trim() ? declared : undefined;
+  }
   const id = provider.id.slice(prefix.length);
   if (!id) return undefined;
-  const declared = provider.meta?.sharedChannelId;
   return declared === undefined || declared === id ? id : undefined;
 }
 

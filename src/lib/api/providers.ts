@@ -6,6 +6,10 @@ import type {
   UniversalProvidersMap,
   SharedChannelApp,
   SharedChannelSaveResult,
+  SharedChannelLinkCandidates,
+  SharedChannelLinkRequest,
+  SharedChannelLinkPreview,
+  SharedChannelLinkResult,
 } from "@/types";
 import type { AppId } from "./types";
 
@@ -219,6 +223,23 @@ export const providersApi = {
 // ============================================================================
 
 export const universalProvidersApi = {
+  async listLinkCandidates(): Promise<SharedChannelLinkCandidates> {
+    return await invoke("list_shared_channel_link_candidates");
+  },
+
+  async previewLink(
+    request: SharedChannelLinkRequest,
+  ): Promise<SharedChannelLinkPreview> {
+    return await invoke("preview_shared_channel_link", { request });
+  },
+
+  async linkExisting(
+    request: SharedChannelLinkRequest,
+    token: string,
+  ): Promise<SharedChannelLinkResult> {
+    return await invoke("link_existing_shared_channel", { request, token });
+  },
+
   async resync(id: string): Promise<SharedChannelSaveResult> {
     return await invoke("resync_shared_channel", { id });
   },

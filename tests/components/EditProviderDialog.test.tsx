@@ -145,43 +145,46 @@ describe("EditProviderDialog", () => {
     apiMocks.getOpenClawLiveProvider.mockReset();
   });
 
-  it("edits the stored linked Codex projection without importing live bearer fields", async () => {
-    const provider: Provider = {
-      id: "universal-codex-shared",
-      name: "Shared Codex",
-      meta: { sharedChannelId: "shared" },
-      settingsConfig: {
-        auth: { OPENAI_API_KEY: "fake-shared-key" },
+  it.each(["universal-codex-shared", "existing-codex-config"])(
+    "edits linked Codex %s without importing live bearer fields",
+    async (id) => {
+      const provider: Provider = {
+        id,
+        name: "Shared Codex",
+        meta: { sharedChannelId: "shared" },
+        settingsConfig: {
+          auth: { OPENAI_API_KEY: "fake-shared-key" },
+          config:
+            'model_provider = "custom"\nmodel = "client-model"\n[model_providers.custom]\nrequires_openai_auth = true\n',
+        },
+      };
+      apiMocks.getCurrent.mockResolvedValue(provider.id);
+      apiMocks.getLiveProviderSettings.mockResolvedValue({
+        auth: { OPENAI_API_KEY: "fake-unrelated-key" },
         config:
-          'model_provider = "custom"\nmodel = "client-model"\n[model_providers.custom]\nrequires_openai_auth = true\n',
-      },
-    };
-    apiMocks.getCurrent.mockResolvedValue(provider.id);
-    apiMocks.getLiveProviderSettings.mockResolvedValue({
-      auth: { OPENAI_API_KEY: "fake-unrelated-key" },
-      config:
-        'model_provider = "custom"\n[model_providers.custom]\nexperimental_bearer_token = "fake-live-token"\nrequires_openai_auth = false\n',
-    });
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
-    render(
-      <EditProviderDialog
-        open
-        provider={provider}
-        appId="codex"
-        onOpenChange={vi.fn()}
-        onSubmit={onSubmit}
-      />,
-    );
-    expect(
-      JSON.parse(screen.getByTestId("settings-config").textContent ?? "{}"),
-    ).toEqual(provider.settingsConfig);
-    fireEvent.submit(document.getElementById("provider-form")!);
-    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
-    expect(onSubmit.mock.calls[0][0].provider.settingsConfig).toEqual(
-      provider.settingsConfig,
-    );
-    expect(apiMocks.getLiveProviderSettings).not.toHaveBeenCalled();
-  });
+          'model_provider = "custom"\n[model_providers.custom]\nexperimental_bearer_token = "fake-live-token"\nrequires_openai_auth = false\n',
+      });
+      const onSubmit = vi.fn().mockResolvedValue(undefined);
+      render(
+        <EditProviderDialog
+          open
+          provider={provider}
+          appId="codex"
+          onOpenChange={vi.fn()}
+          onSubmit={onSubmit}
+        />,
+      );
+      expect(
+        JSON.parse(screen.getByTestId("settings-config").textContent ?? "{}"),
+      ).toEqual(provider.settingsConfig);
+      fireEvent.submit(document.getElementById("provider-form")!);
+      await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+      expect(onSubmit.mock.calls[0][0].provider.settingsConfig).toEqual(
+        provider.settingsConfig,
+      );
+      expect(apiMocks.getLiveProviderSettings).not.toHaveBeenCalled();
+    },
+  );
 
   it("保留 Codex 数据库中的 modelCatalog，避免 live 配置缺字段时清空模型映射", async () => {
     const dbModelCatalog = {
