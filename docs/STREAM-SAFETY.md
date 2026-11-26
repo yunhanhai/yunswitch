@@ -30,6 +30,18 @@ Windows 验收脚本在干净 runner 用虚构密钥和回环上游，分别检�
 
 初版源码 `cda79de2` 的 [CI](https://github.com/yunhanhai/yunswitch/actions/runs/45212209928) 通过；本机代理 1605 项及补充透传测试 1 项、严格 Clippy、类型/格式检查和 renderer 构建通过。前端首次因一组初始化超时失败，该组 7 项单独复验通过；降低并发后完整 147 文件/1114 项通过。
 
-首轮 [Windows 构建与验收](https://github.com/yunhanhai/yunswitch/actions/runs/45212215642) 成功生成包，但运行新增用量场景时发现既有详情 SQL 的 `created_at` 与供应商表列名冲突，验收失败。修正查询的表别名，并补齐供应商存在、删除后及请求不存在的数据库回归；由于实际产品代码改变，必须重新构建，首轮失败包不作为最终验收依据。最终验证结果待补充。
+首轮 [Windows 构建与验收](https://github.com/yunhanhai/yunswitch/actions/runs/45212215642) 成功生成包，但运行新增用量场景时发现既有详情 SQL 的 `created_at` 与供应商表列名冲突，验收失败。修正查询的表别名，并补齐供应商存在、删除后及请求不存在的数据库回归；由于实际产品代码改变，重新构建，首轮失败包不作为最终验收依据。
+
+最终产品源码为 `a251e6188227e113ae6ef7a844924c4e38df477d`。本机用量统计回归 33 项及严格 Clippy 通过；[最终源码 CI](https://github.com/yunhanhai/yunswitch/actions/runs/45220697163) 通过，Windows 库 2975 passed / 6 ignored，Linux、macOS 后端及 Windows＋WSL2 检查均通过。前端 PR 任务因路径未变而跳过，本机完整前端结果单独列于上文。
+
+[最终 Windows 新包验收](https://github.com/yunhanhai/yunswitch/actions/runs/45220687946)于北京时间 2026-11-24 完成，134 项通过、0 项失败；2026-11-26 下载并回读证据与包。便携和从 `.7` 升级后的 MSI 各新增 6 项流检查：约 1 MiB 事件单次/分片传输字节一致，随后 2048 次累计 usage 保留输入和缓存，四条转换路径输出后断连返回安全错误、诊断失败且无重放或成功终态。原有安装、迁移、取消、并发冷却、备用、设置保留与许可检查继续通过。
+
+验收产物 SHA-256：
+
+- MSI：`26c47f7b6181dd7e4a69f023f907d9da656ffc504f5ed68986eead8d8677fa65`。
+- Portable ZIP：`714e2007c4f4c178f669660f6b2aa9f7a8e55d64b56294a066d093ea550f6e70`。
+- ZIP 中程序与运行证据中的程序一致：`1de2d1ea1e653489a9109f7f9ae749017ac69768eed0eb4701ca91151a7c7fe3`。
+
+包哈希与 `results.json`、两个 checksum sidecar 一致，已查看升级后截图。证据保存在本机 `.git/stream-safety-accepted-direct`，同批包在 `.git/stream-safety-accepted-packages-direct`。这些是保留 `.8` 版本号的 build-only 验收包，不替换公开 Release；下一次公开发布须使用新版本号重新构建验收。关联 [GitHub #27](https://github.com/yunhanhai/yunswitch/pull/27) / [Gitee !20](https://gitee.com/yunhanhai/yunswitch/pulls/20)。
 
 无个人客户端配置、密钥、会话或付费 API 测试。
