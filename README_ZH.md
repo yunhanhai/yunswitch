@@ -28,7 +28,7 @@ YunSwitch 帮助你管理 Claude Code、Codex、Gemini CLI 等工具的供应商
 
 ## 下载与快速开始
 
-**新版本准备中：**[`3.20.1-yunswitch.9`](docs/releases/3.20.1-yunswitch.9.md) 将共享 Claude Code / Codex 渠道、关联已有配置、脱敏请求诊断和构建来源纳入新的 Windows 安装包。新包及 `.8` 升级验收仍待完成，下方公开下载保持为 `.8`。
+**新版本准备中：**[`3.20.1-yunswitch.9`](docs/releases/3.20.1-yunswitch.9.md) 将共享 Claude Code / Codex 渠道、关联已有配置、脱敏请求诊断和构建来源纳入新的 Windows 安装包。新包及 `.8` 升级验收已通过 206 项，正在完成发布，下方公开下载暂保持为 `.8`。
 
 当前版本：**`3.20.1-yunswitch.8` Windows x64 预发布**，提供 MSI 安装版与免安装 ZIP。
 

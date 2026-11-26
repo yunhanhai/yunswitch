@@ -28,7 +28,7 @@ Das Projekt wird **eigenständig von yunhanhai gepflegt** und basiert auf [CC Sw
 
 ## Download und Einstieg
 
-**Nächste Version in Vorbereitung:** [`3.20.1-yunswitch.9`](docs/releases/3.20.1-yunswitch.9.md) bündelt gemeinsame Kanäle für Claude Code und Codex, die Verknüpfung vorhandener Konfigurationen, bereinigte Anfragediagnosen und Informationen zur Build-Herkunft in einem neuen Windows-Paket. Die Prüfung dieses Pakets und des Upgrades von `.8` steht noch aus; die öffentlichen Downloads unten bleiben bei `.8`.
+**Nächste Version in Vorbereitung:** [`3.20.1-yunswitch.9`](docs/releases/3.20.1-yunswitch.9.md) bündelt gemeinsame Kanäle für Claude Code und Codex, die Verknüpfung vorhandener Konfigurationen, bereinigte Anfragediagnosen und Informationen zur Build-Herkunft in einem neuen Windows-Paket. Das neue Paket und das Upgrade von `.8` haben 206 Prüfungen bestanden. Die Veröffentlichung wird abgeschlossen; die öffentlichen Downloads unten bleiben vorerst bei `.8`.
 
 Aktuelle Version: **`3.20.1-yunswitch.8` als Windows-x64-Vorabversion**, mit MSI-Installer und portabler ZIP.
 

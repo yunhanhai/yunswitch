@@ -38,7 +38,7 @@
 
 当前公开版本为 `3.20.1-yunswitch.8`，新增已限流请求的恢复协调、动态共享期限及等待预算，见[恢复说明](CODEX-STREAM-RECOVERY.md)与[`.8` 发布记录](releases/3.20.1-yunswitch.8.md)。
 
-当前开发准备版本为 `3.20.1-yunswitch.9`，package.json、Cargo.toml、Cargo.lock 与 Tauri 配置同步，Windows MSI 为 `3.20.1.9`。本版汇总下面已集成的功能，并在关于页显示和复制版本、源码提交与目标平台；新版本源码、真实新包及 `.8` 升级待独立验收，尚未公开，进度见[`.9` 发布记录](releases/3.20.1-yunswitch.9.md)。
+当前开发准备版本为 `3.20.1-yunswitch.9`，package.json、Cargo.toml、Cargo.lock 与 Tauri 配置同步，Windows MSI 为 `3.20.1.9`。本版汇总下面已集成的功能，并在关于页显示和复制版本、源码提交与目标平台；新版本源码 CI 与真实新包、`.8` 升级 206 项验收已通过，尚未公开，进度见[`.9` 发布记录](releases/3.20.1-yunswitch.9.md)。
 
 当前 Windows x64 公开安装版与便携 ZIP 仍是 [GitHub](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.8) 和 [Gitee](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.8) 的 `.8`；安装、`.7` 升级、并发恢复及共享期限检查通过验收。之前的[`.7` 版本](releases/3.20.1-yunswitch.7.md)保留原附件和验收记录。
 
