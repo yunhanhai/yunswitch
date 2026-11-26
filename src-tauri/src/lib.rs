@@ -1638,6 +1638,9 @@ pub fn run() {
             // Universal Provider management
             commands::get_universal_providers,
             commands::get_universal_provider,
+            commands::save_shared_channel,
+            commands::resync_shared_channel,
+            commands::preview_shared_channel,
             commands::upsert_universal_provider,
             commands::delete_universal_provider,
             commands::sync_universal_provider,

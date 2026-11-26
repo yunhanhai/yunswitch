@@ -25,6 +25,7 @@
 
 pub(crate) mod backup;
 mod dao;
+pub(crate) use dao::universal_providers::shared_channel_in_use;
 mod migration;
 mod schema;
 

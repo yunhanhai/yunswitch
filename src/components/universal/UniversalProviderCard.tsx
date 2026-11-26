@@ -10,6 +10,7 @@ interface UniversalProviderCardProps {
   onDelete: (id: string) => void;
   onSync: (id: string) => void;
   onDuplicate: (provider: UniversalProvider) => void;
+  busy?: boolean;
 }
 
 export function UniversalProviderCard({
@@ -18,6 +19,7 @@ export function UniversalProviderCard({
   onDelete,
   onSync,
   onDuplicate,
+  busy = false,
 }: UniversalProviderCardProps) {
   const { t } = useTranslation();
 
@@ -31,13 +33,15 @@ export function UniversalProviderCard({
   return (
     <div className="group relative rounded-xl border border-border/50 bg-card p-4 transition-all hover:border-border hover:shadow-md">
       {/* 头部：图标和名称 */}
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-accent">
             <ProviderIcon icon={provider.icon} name={provider.name} size={24} />
           </div>
-          <div>
-            <h3 className="font-semibold text-foreground">{provider.name}</h3>
+          <div className="min-w-0">
+            <h3 className="break-words font-semibold text-foreground">
+              {provider.name}
+            </h3>
             <p className="text-xs text-muted-foreground">
               {provider.providerType}
             </p>
@@ -45,12 +49,14 @@ export function UniversalProviderCard({
         </div>
 
         {/* 操作按钮 */}
-        <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+        <div className="flex items-center gap-1">
           <Button
             variant="ghost"
             size="icon"
             className="h-8 w-8"
             onClick={() => onSync(provider.id)}
+            disabled={busy}
+            aria-label={t("universalProvider.sync")}
             title={t("universalProvider.sync", { defaultValue: "同步到应用" })}
           >
             <RefreshCw className="h-4 w-4" />
@@ -60,6 +66,8 @@ export function UniversalProviderCard({
             size="icon"
             className="h-8 w-8"
             onClick={() => onDuplicate(provider)}
+            disabled={busy}
+            aria-label={t("universalProvider.duplicate")}
             title={t("universalProvider.duplicate", { defaultValue: "复制" })}
           >
             <Copy className="h-4 w-4" />
@@ -69,6 +77,8 @@ export function UniversalProviderCard({
             size="icon"
             className="h-8 w-8"
             onClick={() => onEdit(provider)}
+            disabled={busy}
+            aria-label={t("common.edit")}
             title={t("common.edit", { defaultValue: "编辑" })}
           >
             <Edit2 className="h-4 w-4" />
@@ -78,6 +88,8 @@ export function UniversalProviderCard({
             size="icon"
             className="h-8 w-8 text-destructive hover:text-destructive"
             onClick={() => onDelete(provider.id)}
+            disabled={busy}
+            aria-label={t("common.delete")}
             title={t("common.delete", { defaultValue: "删除" })}
           >
             <Trash2 className="h-4 w-4" />

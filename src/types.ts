@@ -180,6 +180,8 @@ export interface ProviderRequestBudget {
 
 // 供应商元数据（字段名与后端一致，保持 snake_case）
 export interface ProviderMeta {
+  // Parent shared channel; legacy children are also identified by their stable ID.
+  sharedChannelId?: string;
   // 自定义端点：以 URL 为键，值为端点信息
   custom_endpoints?: Record<string, CustomEndpoint>;
   // 是否在切换/同步到 live 时应用通用配置片段
@@ -593,6 +595,26 @@ export interface UniversalProviderModels {
   gemini?: GeminiModelConfig;
 }
 
+export type SharedChannelApp = "claude" | "codex" | "gemini";
+
+export interface UniversalProviderConnections {
+  claude?: {
+    baseUrl?: string;
+    apiFormat?: ProviderMeta["apiFormat"];
+  };
+  codex?: {
+    baseUrl?: string;
+    apiFormat?: "openai_responses" | "openai_chat" | "anthropic";
+  };
+  gemini?: { baseUrl?: string };
+}
+
+export interface SharedChannelSaveResult {
+  saved: true;
+  syncedApps: SharedChannelApp[];
+  failedApps: SharedChannelApp[];
+}
+
 // 统一供应商（跨应用共享配置）
 export interface UniversalProvider {
   id: string;
@@ -602,6 +624,7 @@ export interface UniversalProvider {
   baseUrl: string;
   apiKey: string;
   models: UniversalProviderModels;
+  connections?: UniversalProviderConnections;
   websiteUrl?: string;
   notes?: string;
   icon?: string;

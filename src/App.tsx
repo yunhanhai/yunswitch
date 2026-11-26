@@ -35,6 +35,7 @@ import { proxyKeys, useProvidersQuery, useSettingsQuery } from "@/lib/query";
 import {
   piApi,
   providersApi,
+  universalProvidersApi,
   settingsApi,
   type AppId,
   type ProviderSwitchEvent,
@@ -48,6 +49,10 @@ import { hermesApi } from "@/lib/api/hermes";
 import { useProxyStatus } from "@/hooks/useProxyStatus";
 import { useUsageCacheBridge } from "@/hooks/useUsageCacheBridge";
 import { useTauriEvent } from "@/hooks/useTauriEvent";
+import {
+  getSharedChannelId,
+  withoutSharedChannelBinding,
+} from "@/utils/sharedChannel";
 import { useLastValidValue } from "@/hooks/useLastValidValue";
 import { useScanUnmanagedSkills } from "@/hooks/useSkills";
 import {
@@ -257,6 +262,7 @@ function App() {
   }, [sharedFeatureApp, currentView]);
 
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
+  const [sharedChannelEditId, setSharedChannelEditId] = useState<string>();
   const [usageProvider, setUsageProvider] = useState<Provider | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
     provider: Provider;
@@ -302,12 +308,21 @@ function App() {
     return target?.provider_id;
   }, [proxyStatus?.active_targets, proxyAppId]);
 
-  const { data, isLoading, refetch } = useProvidersQuery(activeApp, {
-    isProxyRunning: currentAppUsesProxy && isProxyRunning,
-  });
+  const { data, isLoading, isPlaceholderData, refetch } = useProvidersQuery(
+    activeApp,
+    {
+      isProxyRunning: currentAppUsesProxy && isProxyRunning,
+    },
+  );
   const { data: piCurrentState } = usePiCurrentState(activeApp === "pi");
-  const providers = useMemo(() => data?.providers ?? {}, [data]);
-  const currentProviderId = data?.currentProviderId ?? "";
+  // Previous-app placeholder rows must never be editable under the new app ID.
+  const providers = useMemo(
+    () => (isPlaceholderData ? {} : (data?.providers ?? {})),
+    [data, isPlaceholderData],
+  );
+  const currentProviderId = isPlaceholderData
+    ? ""
+    : (data?.currentProviderId ?? "");
   const isOpenClawView =
     activeApp === "openclaw" &&
     (currentView === "providers" ||
@@ -684,7 +699,10 @@ function App() {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "," && (event.metaKey || event.ctrlKey)) {
-        if (managementBusyRef.current) {
+        if (
+          managementBusyRef.current ||
+          document.body.style.overflow === "hidden"
+        ) {
           event.preventDefault();
           return;
         }
@@ -819,6 +837,23 @@ function App() {
     return `${baseKey}-${counter}`;
   };
 
+  const handleManageSharedChannel = async (provider: Provider) => {
+    const id = getSharedChannelId(provider, activeApp);
+    if (!id) return;
+    try {
+      const channel = await universalProvidersApi.get(id);
+      if (!channel) {
+        toast.error(t("universalProvider.linkMissing"));
+        return;
+      }
+      setEditingProvider(null);
+      setSharedChannelEditId(id);
+      setCurrentView("universal");
+    } catch {
+      toast.error(t("universalProvider.loadError"));
+    }
+  };
+
   const handleDuplicateProvider = async (provider: Provider) => {
     const newSortIndex =
       provider.sortIndex !== undefined ? provider.sortIndex + 1 : undefined;
@@ -832,7 +867,9 @@ function App() {
       websiteUrl: provider.websiteUrl,
       category: provider.category,
       sortIndex: newSortIndex, // 复制原 sortIndex + 1
-      meta: provider.meta ? deepClone(provider.meta) : undefined,
+      meta: withoutSharedChannelBinding(
+        provider.meta ? deepClone(provider.meta) : undefined,
+      ),
       icon: provider.icon,
       iconColor: provider.iconColor,
     };
@@ -1201,7 +1238,17 @@ function App() {
         case "universal":
           return (
             <div className="px-6 pt-4">
-              <UniversalProviderPanel />
+              <UniversalProviderPanel
+                initialApp={
+                  activeApp === "claude" ||
+                  activeApp === "codex" ||
+                  activeApp === "gemini"
+                    ? activeApp
+                    : undefined
+                }
+                initialEditId={sharedChannelEditId}
+                onEditConsumed={() => setSharedChannelEditId(undefined)}
+              />
             </div>
           );
 
@@ -1224,74 +1271,72 @@ function App() {
           return (
             <div className="px-6 flex flex-col flex-1 min-h-0 overflow-hidden">
               <div className="flex-1 overflow-y-auto overflow-x-hidden pb-12 px-1">
-                <AnimatePresence mode="wait">
-                  <motion.div
-                    key={activeApp}
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.15 }}
-                    className="space-y-4"
-                  >
-                    <ProviderList
-                      providers={providers}
-                      currentProviderId={currentProviderId}
-                      appId={activeApp}
-                      isLoading={isLoading}
-                      isProxyRunning={currentAppUsesProxy && isProxyRunning}
-                      // 健康轮询只关心代理进程本身，不要被 currentAppUsesProxy
-                      // 短路：否则非代理应用的卡片永远拿不到实时熔断/冷却状态。
-                      isProxyServiceRunning={isProxyRunning}
-                      isProxyTakeover={
-                        isProxyRunning && isCurrentAppTakeoverActive
-                      }
-                      activeProviderId={activeProviderId}
-                      onSwitch={
-                        activeApp === "pi"
-                          ? handleEnablePiProvider
-                          : switchProvider
-                      }
-                      onEdit={(provider) => {
-                        setEditingProvider(provider);
-                      }}
-                      onDelete={(provider) =>
-                        setConfirmAction({ provider, action: "delete" })
-                      }
-                      onRemoveFromConfig={
-                        activeApp === "opencode" ||
-                        activeApp === "openclaw" ||
-                        activeApp === "hermes" ||
-                        activeApp === "pi"
-                          ? (provider) =>
-                              setConfirmAction({ provider, action: "remove" })
+                <motion.div
+                  key={activeApp}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.15 }}
+                  className="space-y-4"
+                >
+                  <ProviderList
+                    providers={providers}
+                    currentProviderId={currentProviderId}
+                    appId={activeApp}
+                    isLoading={isLoading || isPlaceholderData}
+                    isProxyRunning={currentAppUsesProxy && isProxyRunning}
+                    // 健康轮询只关心代理进程本身，不要被 currentAppUsesProxy
+                    // 短路：否则非代理应用的卡片永远拿不到实时熔断/冷却状态。
+                    isProxyServiceRunning={isProxyRunning}
+                    isProxyTakeover={
+                      isProxyRunning && isCurrentAppTakeoverActive
+                    }
+                    activeProviderId={activeProviderId}
+                    onSwitch={
+                      activeApp === "pi"
+                        ? handleEnablePiProvider
+                        : switchProvider
+                    }
+                    onEdit={(provider) => {
+                      setEditingProvider(provider);
+                    }}
+                    onManageSharedChannel={handleManageSharedChannel}
+                    onDelete={(provider) =>
+                      setConfirmAction({ provider, action: "delete" })
+                    }
+                    onRemoveFromConfig={
+                      activeApp === "opencode" ||
+                      activeApp === "openclaw" ||
+                      activeApp === "hermes" ||
+                      activeApp === "pi"
+                        ? (provider) =>
+                            setConfirmAction({ provider, action: "remove" })
+                        : undefined
+                    }
+                    onDisableOmo={
+                      activeApp === "opencode" ? handleDisableOmo : undefined
+                    }
+                    onDisableOmoSlim={
+                      activeApp === "opencode"
+                        ? handleDisableOmoSlim
+                        : undefined
+                    }
+                    onDuplicate={handleDuplicateProvider}
+                    onConvertToCodex={handleConvertToCodex}
+                    onConfigureUsage={setUsageProvider}
+                    onOpenWebsite={handleOpenWebsite}
+                    onOpenTerminal={
+                      activeApp === "claude" ? handleOpenTerminal : undefined
+                    }
+                    onCreate={() => setIsAddOpen(true)}
+                    onSetAsDefault={
+                      activeApp === "openclaw"
+                        ? setAsDefaultModel
+                        : activeApp === "hermes"
+                          ? switchProvider
                           : undefined
-                      }
-                      onDisableOmo={
-                        activeApp === "opencode" ? handleDisableOmo : undefined
-                      }
-                      onDisableOmoSlim={
-                        activeApp === "opencode"
-                          ? handleDisableOmoSlim
-                          : undefined
-                      }
-                      onDuplicate={handleDuplicateProvider}
-                      onConvertToCodex={handleConvertToCodex}
-                      onConfigureUsage={setUsageProvider}
-                      onOpenWebsite={handleOpenWebsite}
-                      onOpenTerminal={
-                        activeApp === "claude" ? handleOpenTerminal : undefined
-                      }
-                      onCreate={() => setIsAddOpen(true)}
-                      onSetAsDefault={
-                        activeApp === "openclaw"
-                          ? setAsDefaultModel
-                          : activeApp === "hermes"
-                            ? switchProvider
-                            : undefined
-                      }
-                    />
-                  </motion.div>
-                </AnimatePresence>
+                    }
+                  />
+                </motion.div>
               </div>
             </div>
           );
@@ -1904,6 +1949,7 @@ function App() {
           }
         }}
         onSubmit={handleEditProvider}
+        onManageSharedChannel={handleManageSharedChannel}
         appId={activeApp}
         isProxyTakeover={isCurrentAppTakeoverActive}
       />

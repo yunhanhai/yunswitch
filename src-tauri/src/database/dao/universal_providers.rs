@@ -1,74 +1,137 @@
-//! 统一供应商 (Universal Provider) DAO
-//!
-//! 提供统一供应商的 CRUD 操作。
+//! Shared channels retain the existing universal_providers storage format.
 
 use crate::database::{lock_conn, to_json_string, Database};
 use crate::error::AppError;
-use crate::provider::UniversalProvider;
+use crate::provider::{Provider, UniversalProvider};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashMap;
 
-/// 统一供应商的 Settings Key
 const UNIVERSAL_PROVIDERS_KEY: &str = "universal_providers";
 
+fn read_channels(conn: &Connection) -> Result<HashMap<String, UniversalProvider>, AppError> {
+    let json: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?",
+            [UNIVERSAL_PROVIDERS_KEY],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| AppError::Database(error.to_string()))?;
+    json.map(|json| {
+        serde_json::from_str(&json)
+            .map_err(|_| AppError::Database("Invalid shared channel data".to_string()))
+    })
+    .unwrap_or_else(|| Ok(HashMap::new()))
+}
+
+fn write_channels(
+    conn: &Connection,
+    channels: &HashMap<String, UniversalProvider>,
+) -> Result<(), AppError> {
+    conn.execute(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+        [UNIVERSAL_PROVIDERS_KEY, &to_json_string(channels)?],
+    )
+    .map_err(|error| AppError::Database(error.to_string()))?;
+    Ok(())
+}
+
+pub(crate) fn shared_channel_in_use() -> AppError {
+    AppError::localized(
+        "shared_channel.in_use",
+        "共享渠道仍在使用中。请先切换当前供应商，并从路由分组、备用队列和模型别名中移除关联，再停用或删除。",
+        "This shared channel is still in use. Switch the current provider and remove its routing group, failover queue and model alias references before disabling or deleting it.",
+    )
+}
+
+fn remove_child(conn: &Connection, app: &str, id: &str) -> Result<(), AppError> {
+    let referenced: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM providers WHERE id = ?1 AND app_type = ?2 AND (is_current = 1 OR in_failover_queue = 1))
+         OR EXISTS(SELECT 1 FROM routing_group_members WHERE provider_id = ?1 AND app_type = ?2)
+         OR EXISTS(SELECT 1 FROM model_aliases WHERE provider_id = ?1 AND app_type = ?2)",
+        params![id, app], |row| row.get(0),
+    ).map_err(|error| AppError::Database(error.to_string()))?;
+    if referenced {
+        return Err(shared_channel_in_use());
+    }
+    conn.execute(
+        "DELETE FROM providers WHERE id = ?1 AND app_type = ?2",
+        params![id, app],
+    )
+    .map_err(|error| AppError::Database(error.to_string()))?;
+    conn.execute(
+        "DELETE FROM stream_check_logs WHERE provider_id = ?1 AND app_type = ?2",
+        params![id, app],
+    )
+    .map_err(|error| AppError::Database(error.to_string()))?;
+    Ok(())
+}
+
 impl Database {
-    /// 获取所有统一供应商
     pub fn get_all_universal_providers(
         &self,
     ) -> Result<HashMap<String, UniversalProvider>, AppError> {
         let conn = lock_conn!(self.conn);
-
-        let mut stmt = conn
-            .prepare("SELECT value FROM settings WHERE key = ?")
-            .map_err(|e| AppError::Database(e.to_string()))?;
-
-        let result: Option<String> = stmt
-            .query_row([UNIVERSAL_PROVIDERS_KEY], |row| row.get(0))
-            .ok();
-
-        match result {
-            Some(json) => serde_json::from_str(&json)
-                .map_err(|e| AppError::Database(format!("解析统一供应商数据失败: {e}"))),
-            None => Ok(HashMap::new()),
-        }
+        read_channels(&conn)
     }
 
-    /// 获取单个统一供应商
     pub fn get_universal_provider(&self, id: &str) -> Result<Option<UniversalProvider>, AppError> {
-        let providers = self.get_all_universal_providers()?;
-        Ok(providers.get(id).cloned())
+        Ok(self.get_all_universal_providers()?.remove(id))
     }
 
-    /// 保存统一供应商（添加或更新）
     pub fn save_universal_provider(&self, provider: &UniversalProvider) -> Result<(), AppError> {
-        let mut providers = self.get_all_universal_providers()?;
-        providers.insert(provider.id.clone(), provider.clone());
-        self.save_all_universal_providers(&providers)
+        let conn = lock_conn!(self.conn);
+        let mut channels = read_channels(&conn)?;
+        channels.insert(provider.id.clone(), provider.clone());
+        write_channels(&conn, &channels)
     }
 
-    /// 删除统一供应商
     pub fn delete_universal_provider(&self, id: &str) -> Result<bool, AppError> {
-        let mut providers = self.get_all_universal_providers()?;
-        let existed = providers.remove(id).is_some();
-        if existed {
-            self.save_all_universal_providers(&providers)?;
-        }
+        let conn = lock_conn!(self.conn);
+        let mut channels = read_channels(&conn)?;
+        let existed = channels.remove(id).is_some();
+        write_channels(&conn, &channels)?;
         Ok(existed)
     }
 
-    /// 保存所有统一供应商（内部方法）
-    fn save_all_universal_providers(
+    /// Commit the master and every child together. A rejected removal or write
+    /// leaves the existing master, credentials and children unchanged.
+    pub(crate) fn save_shared_channel_children(
         &self,
-        providers: &HashMap<String, UniversalProvider>,
+        provider: &UniversalProvider,
+        children: &[(String, Provider)],
+        removed_apps: &[String],
     ) -> Result<(), AppError> {
-        let conn = lock_conn!(self.conn);
-        let json = to_json_string(providers)?;
+        let mut conn = lock_conn!(self.conn);
+        let tx = conn
+            .transaction()
+            .map_err(|error| AppError::Database(error.to_string()))?;
+        for app in removed_apps {
+            remove_child(&tx, app, &format!("universal-{app}-{}", provider.id))?;
+        }
+        let mut channels = read_channels(&tx)?;
+        channels.insert(provider.id.clone(), provider.clone());
+        write_channels(&tx, &channels)?;
+        for (app, child) in children {
+            Self::save_provider_in_transaction(&tx, app, child)?;
+        }
+        tx.commit()
+            .map_err(|error| AppError::Database(error.to_string()))
+    }
 
-        conn.execute(
-            "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
-            [UNIVERSAL_PROVIDERS_KEY, &json],
-        )
-        .map_err(|e| AppError::Database(e.to_string()))?;
-
-        Ok(())
+    pub(crate) fn delete_shared_channel_children(&self, id: &str) -> Result<bool, AppError> {
+        let mut conn = lock_conn!(self.conn);
+        let tx = conn
+            .transaction()
+            .map_err(|error| AppError::Database(error.to_string()))?;
+        for app in ["claude", "codex", "gemini"] {
+            remove_child(&tx, app, &format!("universal-{app}-{id}"))?;
+        }
+        let mut channels = read_channels(&tx)?;
+        let existed = channels.remove(id).is_some();
+        write_channels(&tx, &channels)?;
+        tx.commit()
+            .map_err(|error| AppError::Database(error.to_string()))?;
+        Ok(existed)
     }
 }

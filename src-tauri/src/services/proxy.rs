@@ -1432,6 +1432,28 @@ impl ProxyService {
             .await
     }
 
+    fn is_shared_channel_child(
+        &self,
+        app_type: &AppType,
+        provider: &Provider,
+    ) -> Result<bool, String> {
+        if provider
+            .meta
+            .as_ref()
+            .is_some_and(|meta| meta.shared_channel_id.is_some())
+        {
+            return Ok(true);
+        }
+        let prefix = format!("universal-{}-", app_type.as_str());
+        let Some(id) = provider.id.strip_prefix(&prefix) else {
+            return Ok(false);
+        };
+        self.db
+            .get_universal_provider(id)
+            .map(|channel| channel.is_some())
+            .map_err(|_| "Unable to read shared channel binding".to_string())
+    }
+
     async fn sync_live_config_to_provider(
         &self,
         app_type: &AppType,
@@ -1447,6 +1469,11 @@ impl ProxyService {
                     if let Ok(Some(mut provider)) =
                         self.db.get_provider_by_id(&provider_id, "claude")
                     {
+                        // Shared credentials are edited on the channel. A live
+                        // token import must not silently fork one linked child.
+                        if self.is_shared_channel_child(app_type, &provider)? {
+                            return Ok(());
+                        }
                         if let Some(env) = live_config.get("env").and_then(|v| v.as_object()) {
                             let token_pair = [
                                 "ANTHROPIC_AUTH_TOKEN",
@@ -1542,6 +1569,11 @@ impl ProxyService {
                     if let Ok(Some(mut provider)) =
                         self.db.get_provider_by_id(&provider_id, "codex")
                     {
+                        // Shared credentials are edited on the channel. A live
+                        // token import must not silently fork one linked child.
+                        if self.is_shared_channel_child(app_type, &provider)? {
+                            return Ok(());
+                        }
                         // Official rows are routing/account selectors, not
                         // credential stores. Their auth must remain empty even
                         // when the live Codex login uses OPENAI_API_KEY mode.
@@ -1600,6 +1632,11 @@ impl ProxyService {
                     if let Ok(Some(mut provider)) =
                         self.db.get_provider_by_id(&provider_id, "gemini")
                     {
+                        // Shared credentials are edited on the channel. A live
+                        // token import must not silently fork one linked child.
+                        if self.is_shared_channel_child(app_type, &provider)? {
+                            return Ok(());
+                        }
                         if let Some(token) = live_config
                             .get("env")
                             .and_then(|v| v.get("GEMINI_API_KEY"))
@@ -2831,6 +2868,21 @@ impl ProxyService {
 
         if matches!(app_type_enum, AppType::Codex) {
             let is_codex_official = crate::proxy::providers::is_codex_official_provider(provider);
+            if self.is_shared_channel_child(&app_type_enum, provider)? {
+                // Shared third-party restore sources must already contain the
+                // scoped bearer used by current Codex clients. auth.json may
+                // intentionally be absent or preserve an unrelated OAuth login.
+                let config = effective_settings
+                    .get("config")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let prepared = crate::codex_config::prepare_codex_provider_live_config(
+                    effective_settings.get("auth").unwrap_or(&Value::Null),
+                    config,
+                )
+                .map_err(|_| "Unable to prepare shared Codex restore configuration".to_string())?;
+                effective_settings["config"] = json!(prepared);
+            }
             let existing_backup_value = self
                 .db
                 .get_live_backup(app_type)
@@ -6726,6 +6778,69 @@ model = "gpt-5.1-codex"
             .expect("base_url should exist");
 
         assert_eq!(base_url, new_url);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn shared_channel_takeover_does_not_import_external_live_credentials() {
+        let _home = TempHome::new();
+        crate::settings::reload_settings().unwrap();
+        let db = Arc::new(Database::memory().unwrap());
+        let service = ProxyService::new(db.clone());
+        let mut channel = crate::provider::UniversalProvider::new(
+            "synthetic-shared".into(),
+            "Synthetic".into(),
+            "custom".into(),
+            "https://synthetic.example".into(),
+            "fake-shared-key".into(),
+        );
+        channel.apps.claude = true;
+        channel.apps.codex = true;
+        channel.apps.gemini = true;
+        db.save_universal_provider(&channel).unwrap();
+        for legacy in [false, true] {
+            for (app, mut provider, live, pointer) in [
+                (
+                    AppType::Claude,
+                    channel.to_claude_provider().unwrap(),
+                    json!({"env":{"ANTHROPIC_AUTH_TOKEN":"fake-external-key"}}),
+                    "/env/ANTHROPIC_AUTH_TOKEN",
+                ),
+                (
+                    AppType::Codex,
+                    channel.to_codex_provider().unwrap(),
+                    json!({"auth":{"OPENAI_API_KEY":"fake-external-key"}}),
+                    "/auth/OPENAI_API_KEY",
+                ),
+                (
+                    AppType::Gemini,
+                    channel.to_gemini_provider().unwrap(),
+                    json!({"env":{"GEMINI_API_KEY":"fake-external-key"}}),
+                    "/env/GEMINI_API_KEY",
+                ),
+            ] {
+                if legacy {
+                    provider.meta.as_mut().unwrap().shared_channel_id = None;
+                }
+                db.save_provider(app.as_str(), &provider).unwrap();
+                db.set_current_provider(app.as_str(), &provider.id).unwrap();
+                service
+                    .sync_live_config_to_provider(&app, &live)
+                    .await
+                    .unwrap();
+                let stored = db
+                    .get_provider_by_id(&provider.id, app.as_str())
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(
+                    stored
+                        .settings_config
+                        .pointer(pointer)
+                        .and_then(Value::as_str),
+                    Some("fake-shared-key")
+                );
+            }
+        }
     }
 
     #[tokio::test]
