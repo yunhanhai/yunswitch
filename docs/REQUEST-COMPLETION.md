@@ -32,4 +32,16 @@ Gemini 转 Messages 遇到缺失、未知或异常完成原因时返回固定安
 
 回环基线已复现：客户端只收到部分输出时，旧总览成功数已增加。新增回归覆盖输出后失败、缺终态 EOF、语义 JSON 失败、明确完成后立即关闭、超限未确认、多候选、诊断容量溢出和停止后的迟到收尾。全部使用虚构密钥与合成内容。
 
-前端增加四语状态、计数口径和组件回归；Windows 干净 runner 将在便携与升级后的 MSI 中核对真实计数、诊断、重试、取消、超时、停止重启及总览界面。源码测试和包验收仍在执行中，结果完成后补充；当前不宣称真实供应商、长会话或其他平台安装包通过。公开 `.8` 附件保持不变。
+最终产品与验收脚本源码为 `f9ed82bd2f84a9d8c5086e5e23c5b619881100c1`。本机最终代理回归 1620 项通过，严格 Clippy、TypeScript、Rust/前端/脚本格式和 renderer 构建通过。新增界面定向 20 项通过；本机全量及失败组复验在内存紧张期间出现 App 初始化与 Pi 表单超时，保留失败日志，没有修改无关测试或延长仓库超时。
+
+[源码 CI 45793124775](https://github.com/yunhanhai/yunswitch/actions/runs/45793124775)全部通过：前端 148 文件/1117 项，Windows 库 2989 passed / 6 ignored，Linux 库 2994 passed / 5 ignored，macOS 后端与 Windows＋WSL2 检查也通过。最初回环暴露的 `Content-Length` 最后一块后不再轮询 EOF 已修复并加入测试；JSON 语义失败夹具补充已有输出，以免被既有输出前恢复正确转成 502。旧 Alpha Search 回环在并发本机测试中连接重置，独立复验、最终本机回归和 CI 均通过。
+
+[Windows 构建与验收 45793141053](https://github.com/yunhanhai/yunswitch/actions/runs/45793141053)于 2026-11-26 完成，152 项通过、0 项失败。便携与从 `.7` 升级的 MSI 各新增 9 项：并发成功/截断、完成后立即关闭、HTTP 200 JSON 失败、超大未确认、重试一次结算、取消、空闲超时、停止重启及真实 WebView 六类计数。原有 134 项安装、设置、迁移、恢复保护、流安全与许可检查保留通过。
+
+已下载同批包并核对 `results.json`、两个 checksum sidecar 与 GitHub artifact digest，包内程序与运行证据相同，实际总览截图已回读：
+
+- MSI SHA-256：`e6f6481ef9ddcaed2e602aaf70cf692148b8bf256f2539a1b267350097eedbd5`。
+- Portable ZIP SHA-256：`a950bfa9e97ffd7788f6a709debd54ce63092672d312b78cf0b4036657481534`。
+- 程序 SHA-256：`dd32fb3343f2ec49e44ccc727ba0b133f9c5cc23019c5a5813f94915caddcb8c`。
+
+本机证据 `.git/completion-accepted`，包 `.git/completion-accepted-packages`。关联 [GitHub #28](https://github.com/yunhanhai/yunswitch/pull/28) / [Gitee !21](https://gitee.com/yunhanhai/yunswitch/pulls/21)。这些是 `.8` 同版本 build-only 包；公开 `.8` 附件、版本与标签未更换。真实供应商、长会话、其他平台安装包和跨协议完整多候选转换未据此宣称通过。
