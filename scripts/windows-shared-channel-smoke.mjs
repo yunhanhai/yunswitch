@@ -116,6 +116,19 @@ export async function exerciseSharedChannels(cdp, { check, until, label }) {
     );
   }
   async function click(selector) {
+    if (selector !== '[data-testid="shared-channel-tab"]') {
+      await until(
+        () =>
+          cdp.evaluate(`(() => {
+          const button = document.querySelector(${JSON.stringify(selector)});
+          if (!button || button.disabled || !button.getClientRects().length) return false;
+          button.click();
+          return true;
+        })()`),
+        `click enabled control ${selector}`,
+      );
+      return;
+    }
     const point = await until(
       () =>
         cdp.evaluate(`(() => {
